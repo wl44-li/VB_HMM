@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.13
+# v0.19.25
 
 using Markdown
 using InteractiveUtils
@@ -495,8 +495,11 @@ begin
 	mvnHMM = HMM(π_0, A_mvn, [mvn1, mvn2])
 
 	# test with 2000 data points 
-	mvn_data = rand(mvnHMM, 2000)
+	s_true, mvn_data, = rand(mvnHMM, 2000, seq = true)
 end;
+
+# ╔═╡ a33e7ee9-f8fb-4483-8b15-21d098e9b65d
+s_true # true hidden states
 
 # ╔═╡ 20f39921-7187-4651-9b42-e1c4fc8f1056
 md"""
@@ -513,18 +516,14 @@ Get Dirichlet and NIW parameters from VBEM
 
 # ╔═╡ c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
 begin
-	# Initialize the NormalWishart prior
 	d = 2
 	μ_0 = zeros(d)
 	κ_0 = 0.1
 	ν_0 = d + 1.0
 	Σ_0 = Matrix{Float64}(I, d, d)
-	
 	mvn_prior = Exp_MVN(μ_0, κ_0, ν_0, Σ_0)
-end;
-
-# ╔═╡ 29c0c7f7-4199-4a32-8d55-8ccd7759450d
-dirichlet_f, niw_f = vbem(mvn_data, 2, mvn_prior, 5)
+	dirichlet_f, niw_f = vbem(mvn_data, 2, mvn_prior, 5) # 5 iter
+end
 
 # ╔═╡ f6d66591-f9a6-48f4-9d40-2fd08a220a38
 md"""
@@ -540,6 +539,23 @@ A_est = exp.(log_Ã(dirichlet_f))
 # ╔═╡ c6481a69-b6cb-4f90-a557-303eb7e42f09
 [(niw_f[i].Σ - niw_f[i].m*(niw_f[i].m)'/niw_f[i].κ)/niw_f[i].ν for i in 1:2]
 
+# ╔═╡ da6d3c66-4f8f-4d18-84ec-c84be9153474
+md"""
+#### Testing hidden state s inference
+"""
+
+# ╔═╡ 36b7ede6-6ed5-4daa-8a74-ccf6d049c3fa
+s_f = exp.(vbem_e_step(mvn_data, dirichlet_f, niw_f)[1])
+
+# ╔═╡ 10b8f741-ed45-4cd3-9817-a63f2e4a3aaf
+let
+	ss = [x[1]*2 + x[2]*1 for x in eachcol(s_f)]
+	mad = mean(abs.(s_true - ss))
+	rmse = sqrt(mean((s_true - ss).^2))
+	println("MAD: ", mad)
+	println("RMSE: ", rmse)
+end
+
 # ╔═╡ 5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
 md"""
 #### Test with $K=3$
@@ -547,21 +563,18 @@ md"""
 
 # ╔═╡ 4ab65b62-2f57-4c7b-a58a-b50b773863d0
 begin
-	# debug required
 	Random.seed!(111)
 	m3 = [2.0, 2.0]
 	A_mvn3 = [0.8 0.1 0.1; 0.1 0.8 0.1; 0.1 0.1 0.8]
 	mvn3 = MvNormal(m3,  Σ_true[1])
 	π_3 = [1.0, 0.0, 0.0]
 	mvnHMM_k3 = HMM(π_3, A_mvn3, [mvn1, mvn2, mvn3])
-	mvn_data_k3 = rand(mvnHMM_k3, 10000)
+	s3_true, mvn_data_k3 = rand(mvnHMM_k3, 8000, seq = true)
+	dirichlet_3, niw_3 = vbem(mvn_data_k3, 3, mvn_prior)
 end;
 
 # ╔═╡ 66a1a7d4-db54-47f7-bdfe-953ba155e35a
 mvnHMM_k3
-
-# ╔═╡ 25fa9c45-82d1-44a0-814c-ecf9db6234c4
-dirichlet_3, niw_3 = vbem(mvn_data_k3, 3, mvn_prior)
 
 # ╔═╡ da615595-cffd-4bf8-abd3-5498b7a4d202
 md"""
@@ -586,6 +599,33 @@ Recover co-variances estimates from natural params:
 
 # ╔═╡ 0c1e1848-67d1-4ebb-9b8c-534f7e0cb3c1
 [(niw_3[i].Σ - niw_3[i].m*(niw_3[i].m)'/niw_3[i].κ)/niw_3[i].ν for i in 1:3]
+
+# ╔═╡ d5bbbd58-a4c0-466f-987a-a6f32a80a775
+md"""
+#### Testing hidden state s inference
+"""
+
+# ╔═╡ a3a23fb9-baad-4d04-b8da-82ce2267f0b7
+s3_true
+
+# ╔═╡ eb09f765-ed7d-48b7-833f-0fae8e62227c
+s3_true[1000]
+
+# ╔═╡ ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
+s_f3 = exp.(vbem_e_step(mvn_data_k3, dirichlet_3, niw_3)[1])
+
+# ╔═╡ 8f21e2cd-5f8b-4242-885b-9d42b22fad74
+s_f3[:, 1000] # index of 1 and 2 seemingly reversed? 
+
+# ╔═╡ 9400ad3d-f2af-418e-971e-6031c7164c78
+let
+	ss = [x[1]*2 + x[2]*1 + x[3]*3 for x in eachcol(s_f3)]
+	mad = mean(abs.(s3_true - ss))
+	rmse = sqrt(mean((s3_true - ss).^2))
+	println("MAD: ", mad)
+	println("RMSE: ", rmse)
+	ss
+end
 
 # ╔═╡ 18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
 md"""
@@ -768,7 +808,7 @@ StatsFuns = "~1.3.0"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.8.5"
+julia_version = "1.9.0"
 manifest_format = "2.0"
 project_hash = "f5a8953b04eed71931715b96624fcd92f64a25bc"
 
@@ -806,10 +846,14 @@ uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 version = "1.15.7"
 
 [[deps.ChangesOfVariables]]
-deps = ["ChainRulesCore", "LinearAlgebra", "Test"]
+deps = ["LinearAlgebra", "Test"]
 git-tree-sha1 = "485193efd2176b88e6622a39a246f8c5b600e74e"
 uuid = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
 version = "0.1.6"
+weakdeps = ["ChainRulesCore"]
+
+    [deps.ChangesOfVariables.extensions]
+    ChangesOfVariablesChainRulesCoreExt = "ChainRulesCore"
 
 [[deps.Clustering]]
 deps = ["Distances", "LinearAlgebra", "NearestNeighbors", "Printf", "Random", "SparseArrays", "Statistics", "StatsBase"]
@@ -824,15 +868,19 @@ uuid = "3da002f7-5984-5a60-b8a6-cbb66c0b333f"
 version = "0.11.4"
 
 [[deps.Compat]]
-deps = ["Dates", "LinearAlgebra", "UUIDs"]
+deps = ["UUIDs"]
 git-tree-sha1 = "7a60c856b9fa189eb34f5f8a6f6b5529b7942957"
 uuid = "34da2185-b29b-5c13-b0c7-acf172513d20"
 version = "4.6.1"
+weakdeps = ["Dates", "LinearAlgebra"]
+
+    [deps.Compat.extensions]
+    CompatLinearAlgebraExt = "LinearAlgebra"
 
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.0.1+0"
+version = "1.0.2+0"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "e8119c1a33d267e16108be441a287a6981ba1630"
@@ -862,10 +910,15 @@ uuid = "b4f34e82-e78d-54a5-968a-f98e89d6e8f7"
 version = "0.10.8"
 
 [[deps.Distributions]]
-deps = ["ChainRulesCore", "DensityInterface", "FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "Test"]
+deps = ["FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "SparseArrays", "SpecialFunctions", "Statistics", "StatsBase", "StatsFuns", "Test"]
 git-tree-sha1 = "da9e1a9058f8d3eec3a8c9fe4faacfb89180066b"
 uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
 version = "0.25.86"
+weakdeps = ["ChainRulesCore", "DensityInterface"]
+
+    [deps.Distributions.extensions]
+    DistributionsChainRulesCoreExt = "ChainRulesCore"
+    DistributionsDensityInterfaceExt = "DensityInterface"
 
 [[deps.DocStringExtensions]]
 deps = ["LibGit2"]
@@ -985,14 +1038,20 @@ version = "1.10.2+0"
 uuid = "8f399da3-3557-5675-b5ff-fb832c97cbdb"
 
 [[deps.LinearAlgebra]]
-deps = ["Libdl", "libblastrampoline_jll"]
+deps = ["Libdl", "OpenBLAS_jll", "libblastrampoline_jll"]
 uuid = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 
 [[deps.LogExpFunctions]]
-deps = ["ChainRulesCore", "ChangesOfVariables", "DocStringExtensions", "InverseFunctions", "IrrationalConstants", "LinearAlgebra"]
+deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
 git-tree-sha1 = "0a1b7c2863e44523180fdb3146534e265a91870b"
 uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
 version = "0.3.23"
+weakdeps = ["ChainRulesCore", "ChangesOfVariables", "InverseFunctions"]
+
+    [deps.LogExpFunctions.extensions]
+    LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
+    LogExpFunctionsChangesOfVariablesExt = "ChangesOfVariables"
+    LogExpFunctionsInverseFunctionsExt = "InverseFunctions"
 
 [[deps.Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
@@ -1009,7 +1068,7 @@ uuid = "d6f4376e-aef5-505a-96c1-9c027394607a"
 [[deps.MbedTLS_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "c8ffd9c3-330d-5841-b78e-0817d7145fa1"
-version = "2.28.0+0"
+version = "2.28.2+0"
 
 [[deps.Missings]]
 deps = ["DataAPI"]
@@ -1022,7 +1081,7 @@ uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
-version = "2022.2.1"
+version = "2022.10.11"
 
 [[deps.NaNMath]]
 deps = ["OpenLibm_jll"]
@@ -1043,7 +1102,7 @@ version = "1.2.0"
 [[deps.OpenBLAS_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Libdl"]
 uuid = "4536629a-c528-5b80-bd46-f80d51c5b363"
-version = "0.3.20+0"
+version = "0.3.21+4"
 
 [[deps.OpenLibm_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -1074,9 +1133,9 @@ uuid = "69de0a69-1ddd-5017-9359-2bf0b02dc9f0"
 version = "2.5.8"
 
 [[deps.Pkg]]
-deps = ["Artifacts", "Dates", "Downloads", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
+deps = ["Artifacts", "Dates", "Downloads", "FileWatching", "LibGit2", "Libdl", "Logging", "Markdown", "Printf", "REPL", "Random", "SHA", "Serialization", "TOML", "Tar", "UUIDs", "p7zip_jll"]
 uuid = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
-version = "1.8.0"
+version = "1.9.0"
 
 [[deps.PlutoUI]]
 deps = ["AbstractPlutoDingetjes", "Base64", "ColorTypes", "Dates", "FixedPointNumbers", "Hyperscript", "HypertextLiteral", "IOCapture", "InteractiveUtils", "JSON", "Logging", "MIMEs", "Markdown", "Random", "Reexport", "URIs", "UUIDs"]
@@ -1148,14 +1207,18 @@ uuid = "a2af1166-a08f-5f64-846c-94a0d3cef48c"
 version = "1.1.0"
 
 [[deps.SparseArrays]]
-deps = ["LinearAlgebra", "Random"]
+deps = ["Libdl", "LinearAlgebra", "Random", "Serialization", "SuiteSparse_jll"]
 uuid = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 
 [[deps.SpecialFunctions]]
-deps = ["ChainRulesCore", "IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
+deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_jll"]
 git-tree-sha1 = "ef28127915f4229c971eb43f3fc075dd3fe91880"
 uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
 version = "2.2.0"
+weakdeps = ["ChainRulesCore"]
+
+    [deps.SpecialFunctions.extensions]
+    SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
@@ -1171,6 +1234,7 @@ version = "1.4.0"
 [[deps.Statistics]]
 deps = ["LinearAlgebra", "SparseArrays"]
 uuid = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+version = "1.9.0"
 
 [[deps.StatsAPI]]
 deps = ["LinearAlgebra"]
@@ -1185,24 +1249,34 @@ uuid = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 version = "0.33.21"
 
 [[deps.StatsFuns]]
-deps = ["ChainRulesCore", "HypergeometricFunctions", "InverseFunctions", "IrrationalConstants", "LogExpFunctions", "Reexport", "Rmath", "SpecialFunctions"]
+deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Reexport", "Rmath", "SpecialFunctions"]
 git-tree-sha1 = "f625d686d5a88bcd2b15cd81f18f98186fdc0c9a"
 uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 version = "1.3.0"
+weakdeps = ["ChainRulesCore", "InverseFunctions"]
+
+    [deps.StatsFuns.extensions]
+    StatsFunsChainRulesCoreExt = "ChainRulesCore"
+    StatsFunsInverseFunctionsExt = "InverseFunctions"
 
 [[deps.SuiteSparse]]
 deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
 uuid = "4607b0f0-06f3-5cda-b6b1-a6196a1729e9"
 
+[[deps.SuiteSparse_jll]]
+deps = ["Artifacts", "Libdl", "Pkg", "libblastrampoline_jll"]
+uuid = "bea87d4a-7f5b-5778-9afe-8cc45184846c"
+version = "5.10.1+6"
+
 [[deps.TOML]]
 deps = ["Dates"]
 uuid = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
-version = "1.0.0"
+version = "1.0.3"
 
 [[deps.Tar]]
 deps = ["ArgTools", "SHA"]
 uuid = "a4e569a6-e804-4fa4-b0f3-eef7a1d5b13e"
-version = "1.10.1"
+version = "1.10.0"
 
 [[deps.Test]]
 deps = ["InteractiveUtils", "Logging", "Random", "Serialization"]
@@ -1228,12 +1302,12 @@ uuid = "4ec0a83e-493e-50e2-b9ac-8f72acf5a8f5"
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
-version = "1.2.12+3"
+version = "1.2.13+0"
 
 [[deps.libblastrampoline_jll]]
-deps = ["Artifacts", "Libdl", "OpenBLAS_jll"]
+deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
-version = "5.1.1+0"
+version = "5.7.0+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -1267,7 +1341,6 @@ version = "17.4.0+0"
 # ╟─54f38d75-aa88-4eb8-983e-e2a3038f910f
 # ╟─ebed75fc-0c10-48c7-9352-fc61bc3dcfd8
 # ╠═072762bc-1f27-4a95-ad46-ddbdf45292cc
-# ╟─c83c2754-5cce-46c7-b8df-f006b70f41e0
 # ╟─820a3a70-6df9-4300-8037-21b2d51e8247
 # ╟─49d2d576-e58f-4988-a7df-cdc44c1448db
 # ╠═9390462c-ee9e-415c-a0cc-3942989ad494
@@ -1280,25 +1353,33 @@ version = "17.4.0+0"
 # ╠═268464af-2842-4240-8551-ffc0cc130b70
 # ╠═84a4bb31-26f8-4a9e-a0b2-f5f8952ef08b
 # ╠═453d68e3-9a04-47c3-9af3-37d2347bfd64
+# ╠═a33e7ee9-f8fb-4483-8b15-21d098e9b65d
 # ╟─20f39921-7187-4651-9b42-e1c4fc8f1056
 # ╠═70c8ef1b-b2a9-4ecb-a8c9-70dd57411a8a
 # ╟─e5cfd369-eb38-4bb9-a38d-e9923b5ec199
 # ╠═c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
-# ╠═29c0c7f7-4199-4a32-8d55-8ccd7759450d
 # ╟─f6d66591-f9a6-48f4-9d40-2fd08a220a38
 # ╠═1fdc1902-e892-4b4c-ac2e-5ea2222a6228
 # ╠═7333ac70-4f79-45f5-875a-3df38b55052a
 # ╠═c6481a69-b6cb-4f90-a557-303eb7e42f09
+# ╟─da6d3c66-4f8f-4d18-84ec-c84be9153474
+# ╠═36b7ede6-6ed5-4daa-8a74-ccf6d049c3fa
+# ╠═10b8f741-ed45-4cd3-9817-a63f2e4a3aaf
 # ╟─5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
 # ╠═4ab65b62-2f57-4c7b-a58a-b50b773863d0
 # ╠═66a1a7d4-db54-47f7-bdfe-953ba155e35a
-# ╠═25fa9c45-82d1-44a0-814c-ecf9db6234c4
 # ╟─da615595-cffd-4bf8-abd3-5498b7a4d202
 # ╠═4a6712c6-955f-445e-9c68-b09ae5b00d3d
 # ╟─f0a47b5e-40e6-4efe-b5c7-e3cc01270a0a
 # ╠═50b5bdaf-2467-450f-a0c6-80d55a68586c
 # ╟─1877d3d1-cc43-4271-9542-11d9d1bb7208
 # ╠═0c1e1848-67d1-4ebb-9b8c-534f7e0cb3c1
+# ╟─d5bbbd58-a4c0-466f-987a-a6f32a80a775
+# ╠═a3a23fb9-baad-4d04-b8da-82ce2267f0b7
+# ╠═eb09f765-ed7d-48b7-833f-0fae8e62227c
+# ╠═8f21e2cd-5f8b-4242-885b-9d42b22fad74
+# ╠═ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
+# ╠═9400ad3d-f2af-418e-971e-6031c7164c78
 # ╟─18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
 # ╟─3ac18f00-7e85-4abb-90fc-56b47d9fdd27
 # ╠═d0cba4d1-2d02-4524-afd8-3150c5019f83
