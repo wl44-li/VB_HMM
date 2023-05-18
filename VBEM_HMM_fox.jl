@@ -198,22 +198,22 @@ end
 
 # ╔═╡ e9b7bbd0-2de8-4a5b-af73-3b576e8c54a2
 md"""
-Test with m-step update -> mean
+Test with m-step update on mean
 """
 
 # ╔═╡ 6905f394-3da2-4207-a511-888f7521d82a
 μ_m = post.m/post.κ # recover mean from natural paramerization
 
+# ╔═╡ 5d746477-0282-4656-8db4-5a61561d3ccb
+md"""
+Test with m-step update on Co-variance
+"""
+
 # ╔═╡ ac620936-66fb-4457-b9fd-9180fc9ba994
 Σ_m = post.Σ - post.κ*μ_m*μ_m'
 
-# ╔═╡ 5d746477-0282-4656-8db4-5a61561d3ccb
-md"""
-Test with m-step update -> Co-variance
-"""
-
 # ╔═╡ a4b38c35-e320-439e-b169-b8af974e2635
-Σ_m / (post.ν - 2 - 2)
+Σ_m / (post.ν - 2 - 2) # recover from natural param
 
 # ╔═╡ 61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
 md"""
@@ -434,7 +434,6 @@ function vbem_e_step(ys, dirichlet_params, Exp_MVNs)
 
     K, T = size(log_α)
     log_ξ = zeros(K, K, T-1)
-	
 	log_emiss = zeros(K, T)
 	
 	for i in 1:K
@@ -453,7 +452,6 @@ end
 # α, (μ0, κ0, ν0, Σ0) hyperparameters for Dirichlet and NIW priors
 function vbem(ys, K, mvn_prior::Exp_MVN, max_iter=100; α=1.0)
 	T, D = size(ys)
-	
     dirichlet_params = ones(K, K) * α # K X K
 	
     # Exp_MVNs = [mvn_prior for _ in 1:K] NEED more randomness
@@ -484,22 +482,14 @@ begin
 	m1 = [-2.0, -3.0]
 	m2 = [1.0, 1.0]
 	Σ_true = [Matrix{Float64}(0.8 * I, 2, 2) for _ in 1:2]
-	
 	mvn1 = MvNormal(m1, Σ_true[1])
 	mvn2 = MvNormal(m2, Σ_true[2])
-	
-	A_mvn = [0.8 0.2; 0.2 0.8] 
-
+	A_mvn = [0.8 0.2; 0.1 0.9] 
 	π_0 = [1.0, 0.0]
-	
 	mvnHMM = HMM(π_0, A_mvn, [mvn1, mvn2])
 
-	# test with 2000 data points 
-	s_true, mvn_data, = rand(mvnHMM, 2000, seq = true)
+	s_true, mvn_data, = rand(mvnHMM, 2000, seq=true)
 end;
-
-# ╔═╡ a33e7ee9-f8fb-4483-8b15-21d098e9b65d
-s_true # true hidden states
 
 # ╔═╡ 20f39921-7187-4651-9b42-e1c4fc8f1056
 md"""
@@ -543,6 +533,23 @@ A_est = exp.(log_Ã(dirichlet_f))
 md"""
 #### Testing hidden state s inference
 """
+
+# ╔═╡ 0ff7f6fc-81a7-4eac-b933-5c8e71b6843b
+let
+	log_A = log_Ã(dirichlet_f)
+	log_α, _ = forward_log(mvn_data, log_A, niw_f)
+	log_β = backward_log(mvn_data, log_A, niw_f)
+	
+    # Compute log_ξ and log_γ [identical to Baum-Welch E-step]
+    log_γ = log_α + log_β
+	log_γ .-= logsumexp(log_γ, dims=1)
+	γ = exp.(log_γ)
+
+	[argmax(γ[:, t])[1] for t in 1:size(γ, 2)] #
+end
+
+# ╔═╡ a33e7ee9-f8fb-4483-8b15-21d098e9b65d
+s_true # true hidden states
 
 # ╔═╡ 36b7ede6-6ed5-4daa-8a74-ccf6d049c3fa
 s_f = exp.(vbem_e_step(mvn_data, dirichlet_f, niw_f)[1])
@@ -590,7 +597,7 @@ Recover mean estimates from natural params:
 """
 
 # ╔═╡ 50b5bdaf-2467-450f-a0c6-80d55a68586c
-[niw_3[i].m/niw_3[i].κ for i in 1:3]
+[niw_3[i].m/niw_3[i].κ for i in 1:3] # index 1 and 2 also mixed up, like K=2 case
 
 # ╔═╡ 1877d3d1-cc43-4271-9542-11d9d1bb7208
 md"""
@@ -839,22 +846,6 @@ git-tree-sha1 = "f641eb0a4f00c343bbc32346e1217b86f3ce9dad"
 uuid = "49dc2e85-a5d0-5ad3-a950-438e2897f1b9"
 version = "0.5.1"
 
-[[deps.ChainRulesCore]]
-deps = ["Compat", "LinearAlgebra", "SparseArrays"]
-git-tree-sha1 = "c6d890a52d2c4d55d326439580c3b8d0875a77d9"
-uuid = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
-version = "1.15.7"
-
-[[deps.ChangesOfVariables]]
-deps = ["LinearAlgebra", "Test"]
-git-tree-sha1 = "485193efd2176b88e6622a39a246f8c5b600e74e"
-uuid = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
-version = "0.1.6"
-weakdeps = ["ChainRulesCore"]
-
-    [deps.ChangesOfVariables.extensions]
-    ChangesOfVariablesChainRulesCoreExt = "ChainRulesCore"
-
 [[deps.Clustering]]
 deps = ["Distances", "LinearAlgebra", "NearestNeighbors", "Printf", "Random", "SparseArrays", "Statistics", "StatsBase"]
 git-tree-sha1 = "7ebbd653f74504447f1c33b91cd706a69a1b189f"
@@ -897,12 +888,6 @@ version = "0.18.13"
 deps = ["Printf"]
 uuid = "ade2ca70-3891-5945-98fb-dc099432e06a"
 
-[[deps.DensityInterface]]
-deps = ["InverseFunctions", "Test"]
-git-tree-sha1 = "80c3e8639e3353e5d2912fb3a1916b8455e2494b"
-uuid = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
-version = "0.4.0"
-
 [[deps.Distances]]
 deps = ["LinearAlgebra", "SparseArrays", "Statistics", "StatsAPI"]
 git-tree-sha1 = "49eba9ad9f7ead780bfb7ee319f962c811c6d3b2"
@@ -914,11 +899,14 @@ deps = ["FillArrays", "LinearAlgebra", "PDMats", "Printf", "QuadGK", "Random", "
 git-tree-sha1 = "da9e1a9058f8d3eec3a8c9fe4faacfb89180066b"
 uuid = "31c24e10-a181-5473-b8eb-7969acd0382f"
 version = "0.25.86"
-weakdeps = ["ChainRulesCore", "DensityInterface"]
 
     [deps.Distributions.extensions]
     DistributionsChainRulesCoreExt = "ChainRulesCore"
     DistributionsDensityInterfaceExt = "DensityInterface"
+
+    [deps.Distributions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    DensityInterface = "b429d917-457f-4dbc-8f4c-0cc954292b1d"
 
 [[deps.DocStringExtensions]]
 deps = ["LibGit2"]
@@ -992,12 +980,6 @@ version = "0.2.2"
 deps = ["Markdown"]
 uuid = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 
-[[deps.InverseFunctions]]
-deps = ["Test"]
-git-tree-sha1 = "49510dfcb407e572524ba94aeae2fced1f3feb0f"
-uuid = "3587e190-3f89-42d0-90ee-14403ec27112"
-version = "0.1.8"
-
 [[deps.IrrationalConstants]]
 git-tree-sha1 = "630b497eafcc20001bba38a4651b327dcfc491d2"
 uuid = "92d709cd-6900-40b7-9082-c6be49f344b6"
@@ -1046,12 +1028,16 @@ deps = ["DocStringExtensions", "IrrationalConstants", "LinearAlgebra"]
 git-tree-sha1 = "0a1b7c2863e44523180fdb3146534e265a91870b"
 uuid = "2ab3a3ac-af41-5b50-aa03-7779005ae688"
 version = "0.3.23"
-weakdeps = ["ChainRulesCore", "ChangesOfVariables", "InverseFunctions"]
 
     [deps.LogExpFunctions.extensions]
     LogExpFunctionsChainRulesCoreExt = "ChainRulesCore"
     LogExpFunctionsChangesOfVariablesExt = "ChangesOfVariables"
     LogExpFunctionsInverseFunctionsExt = "InverseFunctions"
+
+    [deps.LogExpFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    ChangesOfVariables = "9e997f8a-9a97-42d5-a9f1-ce6bfc15e2c0"
+    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
 
 [[deps.Logging]]
 uuid = "56ddb016-857b-54e1-b83d-db4d58db5568"
@@ -1215,10 +1201,12 @@ deps = ["IrrationalConstants", "LogExpFunctions", "OpenLibm_jll", "OpenSpecFun_j
 git-tree-sha1 = "ef28127915f4229c971eb43f3fc075dd3fe91880"
 uuid = "276daf66-3868-5448-9aa4-cd146d93841b"
 version = "2.2.0"
-weakdeps = ["ChainRulesCore"]
 
     [deps.SpecialFunctions.extensions]
     SpecialFunctionsChainRulesCoreExt = "ChainRulesCore"
+
+    [deps.SpecialFunctions.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
@@ -1253,11 +1241,14 @@ deps = ["HypergeometricFunctions", "IrrationalConstants", "LogExpFunctions", "Re
 git-tree-sha1 = "f625d686d5a88bcd2b15cd81f18f98186fdc0c9a"
 uuid = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 version = "1.3.0"
-weakdeps = ["ChainRulesCore", "InverseFunctions"]
 
     [deps.StatsFuns.extensions]
     StatsFunsChainRulesCoreExt = "ChainRulesCore"
     StatsFunsInverseFunctionsExt = "InverseFunctions"
+
+    [deps.StatsFuns.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    InverseFunctions = "3587e190-3f89-42d0-90ee-14403ec27112"
 
 [[deps.SuiteSparse]]
 deps = ["Libdl", "LinearAlgebra", "Serialization", "SparseArrays"]
@@ -1332,8 +1323,8 @@ version = "17.4.0+0"
 # ╠═a0fa9433-3ae7-4697-8eea-5d6ddefbf62b
 # ╟─e9b7bbd0-2de8-4a5b-af73-3b576e8c54a2
 # ╠═6905f394-3da2-4207-a511-888f7521d82a
-# ╠═ac620936-66fb-4457-b9fd-9180fc9ba994
 # ╟─5d746477-0282-4656-8db4-5a61561d3ccb
+# ╠═ac620936-66fb-4457-b9fd-9180fc9ba994
 # ╠═a4b38c35-e320-439e-b169-b8af974e2635
 # ╟─61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
 # ╟─5a1de95b-deef-4199-8992-28fcfe2157b8
@@ -1353,16 +1344,17 @@ version = "17.4.0+0"
 # ╠═268464af-2842-4240-8551-ffc0cc130b70
 # ╠═84a4bb31-26f8-4a9e-a0b2-f5f8952ef08b
 # ╠═453d68e3-9a04-47c3-9af3-37d2347bfd64
-# ╠═a33e7ee9-f8fb-4483-8b15-21d098e9b65d
 # ╟─20f39921-7187-4651-9b42-e1c4fc8f1056
 # ╠═70c8ef1b-b2a9-4ecb-a8c9-70dd57411a8a
 # ╟─e5cfd369-eb38-4bb9-a38d-e9923b5ec199
-# ╠═c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
+# ╟─c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
 # ╟─f6d66591-f9a6-48f4-9d40-2fd08a220a38
 # ╠═1fdc1902-e892-4b4c-ac2e-5ea2222a6228
 # ╠═7333ac70-4f79-45f5-875a-3df38b55052a
 # ╠═c6481a69-b6cb-4f90-a557-303eb7e42f09
 # ╟─da6d3c66-4f8f-4d18-84ec-c84be9153474
+# ╠═0ff7f6fc-81a7-4eac-b933-5c8e71b6843b
+# ╠═a33e7ee9-f8fb-4483-8b15-21d098e9b65d
 # ╠═36b7ede6-6ed5-4daa-8a74-ccf6d049c3fa
 # ╠═10b8f741-ed45-4cd3-9817-a63f2e4a3aaf
 # ╟─5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
