@@ -13,7 +13,6 @@ begin
 	using Random
 	using HMMBase
 	using PlutoUI
-	using PDMats
 end
 
 # ╔═╡ 06692696-8edb-42dd-be97-b1ea41e3d60f
@@ -51,40 +50,6 @@ $$\mathcal F(q(π, A, B), q(S)) = \int dπ \int dA \int dB \, q(π, A, B) \{\ln\
 $\ln p(Y) \geq \mathcal F(q(π, A, B), q(S))$
 """
 
-# ╔═╡ 009cfa59-55d5-4d11-8e29-7f09f58a7354
-md"""
-## VB_M Step 
-$\begin{align}
-\ln q(π, A, B) &= \ln p(π, A, B) + \langle \ln p(Y, S| π, A, B) \rangle_{\hat q(S)} + c \\
-&= \ln p(π) + \ln p(A) + \ln p(B) \\ &+ \langle \ln p(s_1| π) \rangle_{\hat q(s_1)} +  \langle \ln p(s_{2:T}| s_1, A) \rangle_{\hat q(S)} +  \langle \ln p(Y| S, B) \rangle_{\hat q(S)} + c
-\end{align}$
-
-where $c$ is the normalizing constant; 
-
-2nd line given by: $q(π, A, B) = q(π) q(A) q(B)$
-
-3rd line given by: log complete likelihood $\ln p(S, Y| \mathbf{θ}) = s_1^T \ln π + \sum_{t=2}^T s_{t-1}^T \ln A \,s_t + \sum_{t=1}^T s_t^T \ln B \, y_t$
-
-By conjugacy, variational posterior distributions have the same form as the priors with their hyperparameters `u` augmented by the sufficient statistics of the hidden states and observations `t(S, Y)`, these are computed from the E-step.
-
-$$\mathbf{w} = \mathbf{u} + \langle t(S, Y) \rangle_{\hat q_(S)}$$
-
-### Compare with MLE Baum-Welch
-Unlike the Baum-Welch M-step, which uses frequency counting to extract the maxium of the MLE, resulting in point estimates of π, A and MVN parameters μ, Σ. 
-
-The VBEM M-step, we update the parameters of the variational posterior distributions for the HMM parameters. We use the expected sufficient statistics calculated during the E-step to update the parameters of the variational posterior distributions.
-
-The VBEM M-step incorporates prior knowledge about the HMM parameters through the use of conjugate priors. 
-
-	Transition matrix A, we use Dirichlet priors on rows of A, 
-
-	Multivariate Gaussian (MVN) emissions, we use a Normal (inverse) Wishart prior. 
-
-These priors choice can influence the updates of the variational posterior distributions, leading to a Bayesian estimation of the parameters. 
-
-The VBEM M-step provides a form of regularization due to the incorporation of priors. In theory, this can prevent overfitting, especially when there is limited data, and lead to more robust estimates of the HMM parameters. 
-"""
-
 # ╔═╡ 4c7b01e4-b201-4605-8bf3-16d404c8be39
 md"""
 ## VB_E Step
@@ -103,9 +68,43 @@ $$\tilde{θ} = \{\exp \langle \ln π \rangle_{\hat q(π)},  \exp \langle \ln A \
 
 """
 
+# ╔═╡ 009cfa59-55d5-4d11-8e29-7f09f58a7354
+md"""
+## VB_M Step 
+$\begin{align}
+\ln q(π, A, B) &= \ln p(π, A, B) + \langle \ln p(Y, S| π, A, B) \rangle_{\hat q(S)} + c \\
+&= \ln p(π) + \ln p(A) + \ln p(B) \\ &+ \langle \ln p(s_1| π) \rangle_{\hat q(s_1)} +  \langle \ln p(s_{2:T}| s_1, A) \rangle_{\hat q(S)} +  \langle \ln p(Y| S, B) \rangle_{\hat q(S)} + c
+\end{align}$
+
+where $c$ is the normalizing constant; 
+
+2nd line given by: $q(π, A, B) = q(π) q(A) q(B)$
+
+3rd line given by: log complete likelihood $\ln p(S, Y| \mathbf{θ}) = s_1^T \ln π + \sum_{t=2}^T s_{t-1}^T \ln A \,s_t + \sum_{t=1}^T s_t^T \ln B \, y_t$
+
+By conjugacy, variational posterior distributions have the same form as the priors with their hyperparameters `u` augmented by the sufficient statistics of the hidden states and observations `t(S, Y)`, these are computed from the E-step.
+
+$$\mathbf{w} = \mathbf{u} + \langle t(S, Y) \rangle_{\hat q_(S)}$$
+
+## Compare with MLE Baum-Welch
+Unlike the Baum-Welch M-step, which uses frequency counting to extract the maxium of the MLE, resulting in point estimates of π, A and MVN parameters μ, Σ. 
+
+The VBEM M-step, we update the parameters of the variational posterior distributions for the HMM parameters. We use the expected sufficient statistics calculated during the E-step to update the parameters of the variational posterior distributions.
+
+The VBEM M-step incorporates prior knowledge about the HMM parameters through the use of conjugate priors. 
+
+	Transition matrix A, we use Dirichlet priors on rows of A, 
+
+	Multivariate Gaussian (MVN) emissions, we use a Normal (inverse) Wishart prior. 
+
+These priors choice can influence the updates of the variational posterior distributions, leading to a Bayesian estimation of the parameters. 
+
+The VBEM M-step provides a form of regularization due to the incorporation of priors. In theory, this can prevent overfitting, especially when there is limited data, and lead to more robust estimates of the HMM parameters. 
+"""
+
 # ╔═╡ 3da884a5-eacb-4749-a10c-5a6ad6da34b7
 md"""
-# VBEM MVN Emission
+# VBEM for HMM with MVN Emission
 The following (batch) VBEM follows largely from Beale's 2003 paper and Fox et al's paper in 2014
 
 Using the following structured mean-field approximation:
@@ -113,6 +112,29 @@ Using the following structured mean-field approximation:
 $$p(A, \{ϕ_k\}, S | Y) \approx q(A) q(\{ϕ_k\}) q(S)$$
 
 where $\{ϕ_k\}$ are parameters Normal (inverse) Wishart distributed, $ϕ_k = \{μ_k, Σ_k\}$, mean vector and co-variance matrix.
+"""
+
+# ╔═╡ 61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
+md"""
+## VB_M, Dirichlet update
+
+During the E-step, you calculate the expected sufficient statistics, which can be the expected number of transitions between states `log_ξ`. After exponentiating and summing over time, you get the following sufficient statistics:
+
+    A matrix sufficient_A of shape (K, K) representing the expected number of transitions between states.
+
+The natural parameterization refers to the representation of the distributions in terms of their natural parameters. Using the natural parameterization often simplifies the calculations and updates in variational inference.
+
+    For the Dirichlet distribution, the natural parameterization is given by the vector of concentration parameters α = (α₁, α₂, ..., αₖ), where k is the number of states. The Dirichlet distribution is typically represented as:
+
+$Dir(π | α) \propto Πᵢ πᵢ^{αᵢ - 1}$
+
+The natural parameters are the exponents minus one: αᵢ - 1.
+
+When updating the Dirichlet parameters in the M-step, you add the prior parameters and the sufficient statistics:
+
+    dirichlet_params_A = A_prior + sufficient_A
+
+	η_new = α - 1 .+ sum(exp.(log_ξ), dims=3)
 """
 
 # ╔═╡ 4a573a35-51b2-4a42-b175-3ba017ef7245
@@ -156,87 +178,14 @@ begin
 		T, D = size(ys)
 		
 		N_k = sum(rs, dims=2)[k]
-		
 		κ_k = prior.κ + N_k
-		
 		ν_k = (prior.ν + 2.0 + D) + N_k
-		
 		m_k = prior.m * prior.κ + sum([ys[t, :] * rs[k, t] for t in 1:T])
-		
 		Σ_k = prior.Σ + prior.κ*prior.m*prior.m' + sum([ys[t, :]*ys[t, :]'*rs[k, t] for t in 1:T])
 		
 		return Exp_MVN(m_k, κ_k, ν_k, Σ_k) # should parse a list of len K to forward/backward
 	end
 end
-
-# ╔═╡ a0fa9433-3ae7-4697-8eea-5d6ddefbf62b
-begin
-	# test M-step update to recover true mean and precision
-	Random.seed!(123)
-
-	# ground-truth
-	μ = [-2, 1]
-	Σ = Matrix{Float64}([2 0; 0 3])
-	
-	data = rand(MvNormal(μ, Σ), 500) # D X T
-
-	# 3 x 100 sufficient stats q(s)
-	logγ = zeros(3, 500)
-	
-	logγ[1,:] .= 1
-	logγ[2,:] .= -Inf
-	logγ[3,:] .= -Inf
-
-	logrs = (logγ .- logsumexp(logγ, dims=1))
-	
-	rs = exp.(logrs)
-
-	prior = Exp_MVN(zeros(2), 0.1, 1.0, Matrix{Float64}(1.0 * I, 2, 2))
-
-	post = Exp_MVN(prior, 1, rs, data')
-end
-
-# ╔═╡ e9b7bbd0-2de8-4a5b-af73-3b576e8c54a2
-md"""
-Test with m-step update on mean
-"""
-
-# ╔═╡ 6905f394-3da2-4207-a511-888f7521d82a
-μ_m = post.m/post.κ # recover mean from natural paramerization
-
-# ╔═╡ 5d746477-0282-4656-8db4-5a61561d3ccb
-md"""
-Test with m-step update on Co-variance
-"""
-
-# ╔═╡ ac620936-66fb-4457-b9fd-9180fc9ba994
-Σ_m = post.Σ - post.κ*μ_m*μ_m'
-
-# ╔═╡ a4b38c35-e320-439e-b169-b8af974e2635
-Σ_m / (post.ν - 2 - 2) # recover from natural param
-
-# ╔═╡ 61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
-md"""
-## VB_M, Dirichlet update
-
-During the E-step, you calculate the expected sufficient statistics, which can be the expected number of transitions between states `log_ξ`. After exponentiating and summing over time, you get the following sufficient statistics:
-
-    A matrix sufficient_A of shape (K, K) representing the expected number of transitions between states.
-
-The natural parameterization refers to the representation of the distributions in terms of their natural parameters. Using the natural parameterization often simplifies the calculations and updates in variational inference.
-
-    For the Dirichlet distribution, the natural parameterization is given by the vector of concentration parameters α = (α₁, α₂, ..., αₖ), where k is the number of states. The Dirichlet distribution is typically represented as:
-
-$Dir(π | α) \propto Πᵢ πᵢ^{αᵢ - 1}$
-
-The natural parameters are the exponents minus one: αᵢ - 1.
-
-When updating the Dirichlet parameters in the M-step, you add the prior parameters and the sufficient statistics:
-
-    dirichlet_params_A = A_prior + sufficient_A
-
-	η_new = α - 1 .+ sum(exp.(log_ξ), dims=3)
-"""
 
 # ╔═╡ 5a1de95b-deef-4199-8992-28fcfe2157b8
 md"""
@@ -265,6 +214,52 @@ function vbem_m_step(ys, log_γ, log_ξ, alpha, prior::Exp_MVN)
     return dirichlet_params_new, Exp_MVNs
 end
 
+# ╔═╡ d7aaea92-8cf6-4ac3-9929-559ab88d65e3
+md"""
+### Test M-Step
+"""
+
+# ╔═╡ a0fa9433-3ae7-4697-8eea-5d6ddefbf62b
+begin
+	# test M-step update to recover true mean and precision
+	Random.seed!(123)
+	
+	# ground-truth
+	μ = [-2, 1]
+	Σ = Matrix{Float64}([2 0; 0 3])
+	data = rand(MvNormal(μ, Σ), 500) # D X T
+
+	# 3 x 100 sufficient stats q(s)
+	logγ = zeros(3, 500)
+	logγ[1,:] .= 1
+	logγ[2,:] .= -Inf
+	logγ[3,:] .= -Inf
+
+	logrs = (logγ .- logsumexp(logγ, dims=1))
+	rs = exp.(logrs)
+	prior = Exp_MVN(zeros(2), 0.1, 1.0, Matrix{Float64}(1.0 * I, 2, 2))
+	post = Exp_MVN(prior, 1, rs, data')
+end
+
+# ╔═╡ e9b7bbd0-2de8-4a5b-af73-3b576e8c54a2
+md"""
+Test m-step update on mean
+"""
+
+# ╔═╡ 6905f394-3da2-4207-a511-888f7521d82a
+μ_m = post.m/post.κ # recover mean from natural param
+
+# ╔═╡ 5d746477-0282-4656-8db4-5a61561d3ccb
+md"""
+Test m-step update on Co-variance
+"""
+
+# ╔═╡ ac620936-66fb-4457-b9fd-9180fc9ba994
+Σ_m = post.Σ - post.κ*μ_m*μ_m'
+
+# ╔═╡ a4b38c35-e320-439e-b169-b8af974e2635
+Σ_m / (post.ν - 2 - 2) # recover from natural param
+
 # ╔═╡ 54f38d75-aa88-4eb8-983e-e2a3038f910f
 md"""
 ## VB_E Step
@@ -287,7 +282,7 @@ md"""
 # E_q[ln(A)]
 function log_Ã(dirichlet_params)
 	row_sums = sum(dirichlet_params, dims=2)
-    log_A_exp = digamma.(dirichlet_params) .- digamma.(row_sums) #broadcasting
+    log_A_exp = digamma.(dirichlet_params) .- digamma.(row_sums) # broadcasting
     return log_A_exp
 end
 
@@ -448,9 +443,14 @@ function vbem_e_step(ys, dirichlet_params, Exp_MVNs)
     return log_γ, log_ξ, log_ζs
 end
 
+# ╔═╡ fcf0b465-7d59-49af-97df-dcf379305671
+md"""
+## VBEM
+"""
+
 # ╔═╡ 84a4bb31-26f8-4a9e-a0b2-f5f8952ef08b
 # α, (μ0, κ0, ν0, Σ0) hyperparameters for Dirichlet and NIW priors
-function vbem(ys, K, mvn_prior::Exp_MVN, max_iter=100; α=1.0)
+function vbem(ys, K::Int64, mvn_prior::Exp_MVN, max_iter=100; α=1.0)
 	T, D = size(ys)
     dirichlet_params = ones(K, K) * α # K X K
 	
@@ -476,6 +476,16 @@ function vbem(ys, K, mvn_prior::Exp_MVN, max_iter=100; α=1.0)
     return dirichlet_params, Exp_MVNs
 end
 
+# ╔═╡ f6d66591-f9a6-48f4-9d40-2fd08a220a38
+md"""
+# Testing VBEM [Batch] Results
+"""
+
+# ╔═╡ 171ea1db-a425-4cf2-93a8-01e94ff329cb
+md"""
+## Test $K=2$
+"""
+
 # ╔═╡ 453d68e3-9a04-47c3-9af3-37d2347bfd64
 begin
 	Random.seed!(111)
@@ -486,23 +496,24 @@ begin
 	mvn2 = MvNormal(m2, Σ_true[2])
 	A_mvn = [0.8 0.2; 0.1 0.9] 
 	π_0 = [1.0, 0.0]
+
+	# use HMMBase to construct test HMM
 	mvnHMM = HMM(π_0, A_mvn, [mvn1, mvn2])
 
-	s_true, mvn_data, = rand(mvnHMM, 2000, seq=true)
+	# generate test data
+	s_true, mvn_data = rand(mvnHMM, 2000, seq=true)
 end;
+
+# ╔═╡ c6dbe013-c810-4be3-b7d8-a072bd6432c1
+mvn_data # T X D matrix
 
 # ╔═╡ 20f39921-7187-4651-9b42-e1c4fc8f1056
 md"""
-Ground truth HMM
+**Ground truth** HMM
 """
 
 # ╔═╡ 70c8ef1b-b2a9-4ecb-a8c9-70dd57411a8a
 mvnHMM
-
-# ╔═╡ e5cfd369-eb38-4bb9-a38d-e9923b5ec199
-md"""
-Get Dirichlet and NIW parameters from VBEM
-"""
 
 # ╔═╡ c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
 begin
@@ -513,11 +524,11 @@ begin
 	Σ_0 = Matrix{Float64}(I, d, d)
 	mvn_prior = Exp_MVN(μ_0, κ_0, ν_0, Σ_0)
 	dirichlet_f, niw_f = vbem(mvn_data, 2, mvn_prior, 5) # 5 iter
-end
+end;
 
-# ╔═╡ f6d66591-f9a6-48f4-9d40-2fd08a220a38
+# ╔═╡ cfa4a7d2-3a6a-40bd-80fb-449f91584ed9
 md"""
-### Testing VBEM [Batch] Results
+### Infer model parameters
 """
 
 # ╔═╡ 1fdc1902-e892-4b4c-ac2e-5ea2222a6228
@@ -531,7 +542,7 @@ A_est = exp.(log_Ã(dirichlet_f))
 
 # ╔═╡ da6d3c66-4f8f-4d18-84ec-c84be9153474
 md"""
-#### Testing hidden state s inference
+### Hidden state inference
 """
 
 # ╔═╡ 0ff7f6fc-81a7-4eac-b933-5c8e71b6843b
@@ -565,7 +576,7 @@ end
 
 # ╔═╡ 5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
 md"""
-#### Test with $K=3$
+## Test $K=3$
 """
 
 # ╔═╡ 4ab65b62-2f57-4c7b-a58a-b50b773863d0
@@ -580,8 +591,18 @@ begin
 	dirichlet_3, niw_3 = vbem(mvn_data_k3, 3, mvn_prior)
 end;
 
+# ╔═╡ a6143756-dafc-41d3-9a46-8a5c23dfd87e
+md"""
+**Ground truth** HMM $K=3$
+"""
+
 # ╔═╡ 66a1a7d4-db54-47f7-bdfe-953ba155e35a
 mvnHMM_k3
+
+# ╔═╡ 1abdb6ea-8de2-4df2-b278-03335639a202
+md"""
+### Infer model parameters
+"""
 
 # ╔═╡ da615595-cffd-4bf8-abd3-5498b7a4d202
 md"""
@@ -609,14 +630,11 @@ Recover co-variances estimates from natural params:
 
 # ╔═╡ d5bbbd58-a4c0-466f-987a-a6f32a80a775
 md"""
-#### Testing hidden state s inference
+### Hidden state inference
 """
 
 # ╔═╡ a3a23fb9-baad-4d04-b8da-82ce2267f0b7
 s3_true
-
-# ╔═╡ eb09f765-ed7d-48b7-833f-0fae8e62227c
-s3_true[1000]
 
 # ╔═╡ ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
 s_f3 = exp.(vbem_e_step(mvn_data_k3, dirichlet_3, niw_3)[1])
@@ -636,8 +654,9 @@ end
 
 # ╔═╡ 18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
 md"""
-### Convergence Check
+# Convergence Check
 
+## ELBO Computation
 **ELBO of Gaussian HMM** can be expressed as:
 
 $\begin{align}
@@ -766,6 +785,16 @@ function vbem_c(ys, K, mvn_prior::Exp_MVN, max_iter=200; α=1.0, tol=1e-3)
     return dirichlet_params_p, Exp_MVNs_p
 end
 
+# ╔═╡ 482e735a-610c-414c-83ac-0e1e1e2d4d86
+md"""
+## VBEM with convergence check
+"""
+
+# ╔═╡ 99c2a566-38a2-40f0-9184-d592ec79694e
+md"""
+### K = 2
+"""
+
 # ╔═╡ 875aa3bc-c4b9-4dce-987d-62dbe1d40d37
 dirichlet_c, niw_c = vbem_c(mvn_data, 2, mvn_prior)
 
@@ -777,6 +806,11 @@ A_est_c = exp.(log_Ã(dirichlet_c))
 
 # ╔═╡ 58a00d74-3383-4e98-a4ec-97655801516a
 [(niw_c[i].Σ - niw_c[i].m*(niw_c[i].m)'/niw_c[i].κ)/niw_c[i].ν for i in 1:2]
+
+# ╔═╡ 9365ad98-d6ff-424f-94ff-6c754315417c
+md"""
+### K = 3
+"""
 
 # ╔═╡ fbdd786f-24f2-497d-a804-7af8cf5cb72e
 dirichlet_c3, niw_c3 = vbem_c(mvn_data_k3, 3, mvn_prior)
@@ -796,7 +830,6 @@ PLUTO_PROJECT_TOML_CONTENTS = """
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 HMMBase = "b2b3ca75-8444-5ffa-85e6-af70e2b64fe7"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
-PDMats = "90014a1f-27ba-587c-ab20-58faa44d9150"
 PlutoUI = "7f904dfe-b85e-4ff6-b463-dae2292396a8"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
@@ -805,7 +838,6 @@ StatsFuns = "4c63d2b9-4356-54db-8cca-17b64c39e42c"
 [compat]
 Distributions = "~0.25.86"
 HMMBase = "~1.0.7"
-PDMats = "~0.11.17"
 PlutoUI = "~0.7.50"
 SpecialFunctions = "~2.2.0"
 StatsFuns = "~1.3.0"
@@ -817,7 +849,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.9.0"
 manifest_format = "2.0"
-project_hash = "f5a8953b04eed71931715b96624fcd92f64a25bc"
+project_hash = "a6438531fc0646d16c00217b6cc6d3f9c21daf28"
 
 [[deps.AbstractPlutoDingetjes]]
 deps = ["Pkg"]
@@ -1315,20 +1347,21 @@ version = "17.4.0+0"
 # ╠═db588217-5856-47b9-bfa2-637f84d19cd4
 # ╟─06692696-8edb-42dd-be97-b1ea41e3d60f
 # ╟─ed4603db-b956-4098-85e9-dcd97b132cb4
-# ╟─009cfa59-55d5-4d11-8e29-7f09f58a7354
 # ╟─4c7b01e4-b201-4605-8bf3-16d404c8be39
+# ╟─009cfa59-55d5-4d11-8e29-7f09f58a7354
 # ╟─3da884a5-eacb-4749-a10c-5a6ad6da34b7
+# ╟─61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
 # ╟─4a573a35-51b2-4a42-b175-3ba017ef7245
 # ╠═ae313199-fe27-478a-b6b2-bee2923b5a54
+# ╟─5a1de95b-deef-4199-8992-28fcfe2157b8
+# ╠═b4d1bdf3-efd6-4851-9d33-e1564b8ed769
+# ╟─d7aaea92-8cf6-4ac3-9929-559ab88d65e3
 # ╠═a0fa9433-3ae7-4697-8eea-5d6ddefbf62b
 # ╟─e9b7bbd0-2de8-4a5b-af73-3b576e8c54a2
 # ╠═6905f394-3da2-4207-a511-888f7521d82a
 # ╟─5d746477-0282-4656-8db4-5a61561d3ccb
 # ╠═ac620936-66fb-4457-b9fd-9180fc9ba994
 # ╠═a4b38c35-e320-439e-b169-b8af974e2635
-# ╟─61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
-# ╟─5a1de95b-deef-4199-8992-28fcfe2157b8
-# ╠═b4d1bdf3-efd6-4851-9d33-e1564b8ed769
 # ╟─54f38d75-aa88-4eb8-983e-e2a3038f910f
 # ╟─ebed75fc-0c10-48c7-9352-fc61bc3dcfd8
 # ╠═072762bc-1f27-4a95-ad46-ddbdf45292cc
@@ -1342,13 +1375,16 @@ version = "17.4.0+0"
 # ╠═3c4f3444-2547-4ecd-816c-05b35c73f050
 # ╟─48f0208e-8b99-4b68-9982-02fa18bc0ab1
 # ╠═268464af-2842-4240-8551-ffc0cc130b70
+# ╟─fcf0b465-7d59-49af-97df-dcf379305671
 # ╠═84a4bb31-26f8-4a9e-a0b2-f5f8952ef08b
-# ╠═453d68e3-9a04-47c3-9af3-37d2347bfd64
-# ╟─20f39921-7187-4651-9b42-e1c4fc8f1056
-# ╠═70c8ef1b-b2a9-4ecb-a8c9-70dd57411a8a
-# ╟─e5cfd369-eb38-4bb9-a38d-e9923b5ec199
-# ╟─c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
 # ╟─f6d66591-f9a6-48f4-9d40-2fd08a220a38
+# ╟─171ea1db-a425-4cf2-93a8-01e94ff329cb
+# ╠═453d68e3-9a04-47c3-9af3-37d2347bfd64
+# ╠═c6dbe013-c810-4be3-b7d8-a072bd6432c1
+# ╟─20f39921-7187-4651-9b42-e1c4fc8f1056
+# ╟─70c8ef1b-b2a9-4ecb-a8c9-70dd57411a8a
+# ╠═c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
+# ╟─cfa4a7d2-3a6a-40bd-80fb-449f91584ed9
 # ╠═1fdc1902-e892-4b4c-ac2e-5ea2222a6228
 # ╠═7333ac70-4f79-45f5-875a-3df38b55052a
 # ╠═c6481a69-b6cb-4f90-a557-303eb7e42f09
@@ -1359,7 +1395,9 @@ version = "17.4.0+0"
 # ╠═10b8f741-ed45-4cd3-9817-a63f2e4a3aaf
 # ╟─5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
 # ╠═4ab65b62-2f57-4c7b-a58a-b50b773863d0
+# ╟─a6143756-dafc-41d3-9a46-8a5c23dfd87e
 # ╠═66a1a7d4-db54-47f7-bdfe-953ba155e35a
+# ╟─1abdb6ea-8de2-4df2-b278-03335639a202
 # ╟─da615595-cffd-4bf8-abd3-5498b7a4d202
 # ╠═4a6712c6-955f-445e-9c68-b09ae5b00d3d
 # ╟─f0a47b5e-40e6-4efe-b5c7-e3cc01270a0a
@@ -1368,7 +1406,6 @@ version = "17.4.0+0"
 # ╠═0c1e1848-67d1-4ebb-9b8c-534f7e0cb3c1
 # ╟─d5bbbd58-a4c0-466f-987a-a6f32a80a775
 # ╠═a3a23fb9-baad-4d04-b8da-82ce2267f0b7
-# ╠═eb09f765-ed7d-48b7-833f-0fae8e62227c
 # ╠═8f21e2cd-5f8b-4242-885b-9d42b22fad74
 # ╠═ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
 # ╠═9400ad3d-f2af-418e-971e-6031c7164c78
@@ -1378,10 +1415,13 @@ version = "17.4.0+0"
 # ╟─429c5dfd-4f78-4697-b710-777bd5a38240
 # ╠═51a5c3e6-7b0a-4d54-b9d3-5eb6054ec72d
 # ╠═a2e69fa3-17a3-4588-8f65-be6d77b09c4f
+# ╟─482e735a-610c-414c-83ac-0e1e1e2d4d86
+# ╟─99c2a566-38a2-40f0-9184-d592ec79694e
 # ╠═875aa3bc-c4b9-4dce-987d-62dbe1d40d37
 # ╠═289d16d6-528e-4e07-9440-9573d2f71724
 # ╠═30cbc8bf-f0ae-4514-b4f3-1e8734f38377
 # ╠═58a00d74-3383-4e98-a4ec-97655801516a
+# ╟─9365ad98-d6ff-424f-94ff-6c754315417c
 # ╠═fbdd786f-24f2-497d-a804-7af8cf5cb72e
 # ╠═1e8b3bed-943e-4e93-a096-958e1dbdfa6d
 # ╠═54c2fe20-7b86-4d72-9449-5e942496fdb6
