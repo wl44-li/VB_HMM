@@ -686,12 +686,17 @@ Compute KL divergence of Dirichlet distributed rows of A
 """
 
 # ╔═╡ d0cba4d1-2d02-4524-afd8-3150c5019f83
-# to be used for each row of A
+# to be used for each row of A, α -> p(A), β -> q(A)
 function kl_dirichlet(α::Array{Float64, 1}, β::Array{Float64, 1})
     # cf. Beal Appendix A, p261
+	
 	α_sum, β_sum = sum(α), sum(β)
-    kl = loggamma(β_sum) - loggamma(α_sum) - sum(loggamma.(β) - loggamma.(α))
-    kl += sum((α - β) .* (digamma.(α) .- digamma(α_sum)))
+	
+    #kl = -loggamma(β_sum) + loggamma(α_sum) - sum(loggamma.(α) - loggamma.(β))
+    #kl += sum((α - β) .* (digamma.(α) .- digamma(α_sum)))
+
+	kl = loggamma(β_sum) - loggamma(α_sum) + sum(loggamma.(α) - loggamma.(β))
+	kl += sum((β - α) .* (digamma.(β) .- digamma(β_sum)))
     return kl
 end
 
@@ -721,20 +726,11 @@ function kl_niw(p::Exp_MVN, q::Exp_MVN)
 	ν_q = q.ν - 2.0 - D
 	Σ_q = q.Σ - κ_q*m_q*m_q'
 
-	Σ_inv = inv(Σ_q)
+	Σ_inv = inv(Σ_p)
 
-	kl = -0.5*logdet(Σ_p*Σ_inv)
-
-	kl -= 0.5*tr(I - (Σ_p + (m_p - m_q)*(m_p - m_q)')*Σ_inv)
+	kl = -0.5*logdet(Σ_q*Σ_inv)
+	kl -= 0.5*tr(I - (Σ_q + (m_p - m_q)*(m_p - m_q)')*Σ_inv)
 	
-	"""
-    kl = 0.5 * (trace(Σ_inv * Σ_p) + (m_p - m_q)' * Σ_inv * (m_p - m_q) - D)
-    kl += 0.5 * (logdet(Σ_q) - logdet(Σ_p)) * (ν_p - ν_q)
-    
-    for j in 1:D
-        kl += 0.5 * (ν_p - j) * (digamma((ν_q - j) / 2) - digamma((ν_p - j) / 2)) * (ν_q - ν_p)
-    end
-	"""
 	return kl
 end
 
@@ -1409,7 +1405,7 @@ version = "17.4.0+0"
 # ╠═8f21e2cd-5f8b-4242-885b-9d42b22fad74
 # ╠═ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
 # ╠═9400ad3d-f2af-418e-971e-6031c7164c78
-# ╟─18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
+# ╠═18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
 # ╟─3ac18f00-7e85-4abb-90fc-56b47d9fdd27
 # ╠═d0cba4d1-2d02-4524-afd8-3150c5019f83
 # ╟─429c5dfd-4f78-4697-b710-777bd5a38240
