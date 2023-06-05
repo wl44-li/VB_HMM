@@ -135,12 +135,11 @@ $w_{j, j'}^{(A)} = u_{j'}^{(A)} + \sum_{t=2}^T ξ(s_t, s_{t+1})$
 $q(B) = \prod_{j=1}^K \mathcal Dir(b_{j, 1}, ...,  b_{j, D} | w^{(B)})$
 
 $w_{j, q}^{(B)} = u_{q}^{(B)} + \sum_{t=1}^T γ(s_t, j)p(y_t , q)$
-
 """
 
 # ╔═╡ 93d378e6-b6bf-4065-b483-5010a54b04b4
 # prior struct for HMM (discrete emission)
-struct U_πAB
+struct U_Prior
 	u_π
 	u_A
 	u_B
@@ -148,27 +147,50 @@ end
 
 # ╔═╡ 99234c60-3250-4c63-82ee-f15b6299d856
 # log_γ, log_ξ are sufficient stats from VBEM E-step
-function vbem_m(ys, log_γ, log_ξ, prior::U_πAB)
-    D, T =  size(ys)
-    # Update Dirichlet parameters [prior + sufficient stats]
+function vbem_m(ys, log_γ, log_ξ, prior::U_Prior)
+    D, T = size(ys)
+	K, _ = size(log_γ)
+	P = length(unique(vec(ys)))
 
-	# TO-DO
-	w_π = prior.u_π .+ exp.(log_γ[:, 1])
+    # Update Dirichlet parameters [prior + sufficient stats]
+	γ_counts = exp.(log_γ)
+	
+	w_π = prior.u_π .+ γ_counts[:, 1]
 	w_A = prior.u_A .+ sum(exp.(log_ξ), dims=3)[:, :, 1]
-	w_B = prior.u_B 
-    
+	w_B = prior.u_B
+	
+     for k in 1:K
+        for p in 1:P
+            joint_count = sum([γ_counts[k, t] for t in 1:T if ys[t] == p]) # uni-variate y
+            w_B[k, p] += joint_count
+        end
+    end
     return w_π, w_A, w_B
 end
 
+# ╔═╡ a4122178-c8c6-4e67-9a9a-ccf95d3bc96f
+md"""
+Test M-step (uni-variate y)
+"""
+
 # ╔═╡ 5baf0c31-717c-4e0c-84a5-ebe9da192dbd
 function log_π̃(w_π)
-
+	log_π_exp = digamma.(w_π) .- digamma(sum(w_π))
     return log_π_exp
+end
+
+# ╔═╡ 072762bc-1f27-4a95-ad46-ddbdf45292cc
+# E_q[ln(A)] # RE-USE
+function log_Ã(w_A)
+	row_sums = sum(w_A, dims=2)
+    log_A_exp = digamma.(w_A) .- digamma.(row_sums) # broadcasting
+    return log_A_exp
 end
 
 # ╔═╡ 495d7a29-5b02-49d8-b376-bf1d088026c1
 function log_B̃(w_B)
-
+	row_sums = sum(w_B, dims=2)
+    log_B_exp = digamma.(w_B) .- digamma.(row_sums) # broadcasting
     return log_B_exp
 end
 
@@ -179,13 +201,79 @@ md"""
 
 # ╔═╡ e7e199fd-cc7f-483f-b588-00013b9069d1
 function forward_l(ys, log_π̃, log_Ã, log_B̃)
+	D, T = size(ys)
+	K = length(log_π̃) # K Hidden states
+	log_alpha = zeros(K, T)
+	l_ζs = zeros(T) # used for ELBO 
 	
+
+	log_alpha[:, 1] = log_π̃ .+ log_B̃[:, ys[1]]
+    
+	# Normalize t=1
+	l_ζs[1] = logsumexp(log_alpha[:, 1])
+    log_alpha[:, 1] .-= l_ζs[1] 
+
+    # Iterate through the remaining time steps
+    for t in 2:T
+        for k in 1:K
+            log_alpha[k, t] = logsumexp(log_alpha[:, t-1] .+ log_Ã[:, k]) + log_B̃[k, ys[t]]
+        end
+		
+        # Normalize log_alpha for t > 1
+		l_ζs[t] = logsumexp(log_alpha[:, t])
+        log_alpha[:, t] .-= l_ζs[t]
+    end
+
+    return log_alpha, l_ζs
 end
 
 # ╔═╡ a2019816-e7b9-4eda-be76-9b3ebbb990e3
 function backward_l(ys, log_Ã, log_B̃)
+	D, T = size(ys)
+    K = size(log_Ã, 1)
+    log_beta = zeros(K, T)
 	
+	# casino data
+	for t in T-1:-1:1
+		for i in 1:K
+			log_beta[i, t] = logsumexp(log_Ã[i, :] .+ log_B̃[:, ys[:, t+1]] .+ 							   log_beta[:, t+1])
+		end
+		
+		log_beta[:, t] .-= logsumexp(log_beta[:, t]) 
+	end
+
+	return log_beta
 end
+
+# ╔═╡ 2b01dd4d-fba9-49dd-9802-67cea335d49c
+function vbem_e(ys, w_π, w_A, w_B)
+	D, T = size(ys)
+    K = length(w_π)
+	
+	log_π = log_π̃(w_π)
+	log_A = log_Ã(w_A)
+	log_B = log_B̃(w_B)
+		
+	log_α, log_ζs = forward_l(ys, log_π, log_A, log_B)
+	log_β = backward_l(ys, log_A, log_B)
+	
+    log_γ = log_α .+ log_β
+	log_γ .-= logsumexp(log_γ, dims=1)
+
+	log_ξ = zeros(K, K, T-1)
+	
+    for t in 1:T-1
+		log_ξ[:, :, t] = log_α[:, t] .+ log_A .+ log_B[:, ys[t+1]]' .+ log_β[:, t+1]'
+        log_ξ[:, :, t] .-= logsumexp(log_ξ[:, :, t]) 
+    end
+	
+    return log_γ, log_ξ, log_ζs
+end
+
+# ╔═╡ c38bfc75-4281-4b52-aeac-0a9dbf7f8776
+md"""
+## VBEM
+"""
 
 # ╔═╡ 3da884a5-eacb-4749-a10c-5a6ad6da34b7
 md"""
@@ -363,30 +451,10 @@ md"""
 ### Expected log Ã
 """
 
-# ╔═╡ 072762bc-1f27-4a95-ad46-ddbdf45292cc
-# E_q[ln(A)] # RE-USE
-function log_Ã(dirichlet_params)
-	row_sums = sum(dirichlet_params, dims=2)
-    log_A_exp = digamma.(dirichlet_params) .- digamma.(row_sums) # broadcasting
-    return log_A_exp
-end
-
-# ╔═╡ 2b01dd4d-fba9-49dd-9802-67cea335d49c
-function vbem_e(ys, w_π, w_A, w_B)
-	log_π = log_π̃(w_π)
-	log_A = log_Ã(w_A)
-	log_B = log_B̃(w_B)
-		
-	log_α, log_ζs = forward_l(ys, log_π, log_A, log_B)
-	log_β = backward_l(ys, log_A, log_B)
-	
-    # Compute log_ξ and log_γ [identical to Baum-Welch E-step]
-    log_γ = log_α .+ log_β
-	log_γ .-= logsumexp(log_γ, dims=1)
-
-	
-    return log_γ, log_ξ, log_ζs
-end
+# ╔═╡ 137cafd1-fe56-4db8-9e28-f1e133887be4
+md"""
+Re-use from discrete HMM
+"""
 
 # ╔═╡ 820a3a70-6df9-4300-8037-21b2d51e8247
 md"""
@@ -802,6 +870,51 @@ function kl_dirichlet(α::Array{Float64, 1}, β::Array{Float64, 1})
     return kl
 end
 
+# ╔═╡ e4991173-290e-4a28-838b-f2afbec67c93
+function vbem_hmm(ys, K, prior::U_Prior, max_iter=1000, r_seed=69, tol=5e-3)
+	D, T = size(ys)
+	P = length(unique(vec(ys)))
+
+	# random initialisation (sensitive start)
+	Random.seed!(r_seed)
+	w_π = rand(Dirichlet(ones(K)))
+    w_A = [rand(Dirichlet(ones(K))) for _ in 1:K]
+    w_A = hcat(w_A...)'
+    w_B = [rand(Dirichlet(ones(P))) for _ in 1:K]
+    w_B = hcat(w_B...)'
+	
+	elbo_prev = -Inf
+	
+	for iter in 1:max_iter
+        # E-step
+        log_γ, log_ξ, log_ζs = vbem_e(ys, w_π, w_A, w_B)
+
+        # M-step
+        w_π, w_A, w_B = vbem_m(ys, log_γ, log_ξ, prior)
+
+		# Convergence check
+		kl_π = kl_dirichlet(prior.u_π, w_π)
+		kl_A = sum(kl_dirichlet(prior.u_A[i, :], w_A[i, :]) for i in 1:K)
+		kl_B = sum(kl_dirichlet(prior.u_B[i, :], w_B[i, :]) for i in 1:K)
+		log_Z̃ = sum(log_ζs)
+
+		elbo = kl_π + kl_A + kl_B + log_Z̃
+		
+		if abs(elbo - elbo_prev) < tol
+			println("Stopped at iteration: $iter")
+            break
+		end
+		
+        elbo_prev = elbo
+		
+		if (iter == max_iter)
+			println("Warning: VB has not necessarily converged at $max_iter iterations")
+		end
+    end
+
+    return w_π, w_A, w_B
+end
+
 # ╔═╡ 429c5dfd-4f78-4697-b710-777bd5a38240
 md"""
 Compute KL divergence of MVN emission (using natural parameters of NIW prior)
@@ -929,7 +1042,7 @@ md"""
 
 # ╔═╡ 5597ece4-8184-4495-a2f9-a8ec1b7c5d2c
 md"""
-## MLE/ Baum-Welch
+## MLE/ Baum-Welch (Uni-var y)
 """
 
 # ╔═╡ f674e936-f124-48b6-bd3b-cce7f9b7e6b4
@@ -981,9 +1094,20 @@ begin
 	casinoHMM = HMM(π_i, A_casino, [die1, die2])
 	B_casino = hcat(die1.p, die2.p)'
 	Random.seed!(123)
-	true_coins, c_data = rand(casinoHMM, 10000, seq=true)
+	true_coins, c_data = rand(casinoHMM, 5000, seq=true)
 	c_data = Int.(c_data) 
 end;
+
+# ╔═╡ 6ddf3db6-11f2-4cbc-a71e-e818ca1f27f4
+let
+	u = U_Prior(ones(2) .* 0.01, ones(2, 2) * 0.01, ones(2, 6) * 0.01)
+	w_π, w_A, w_B = vbem_hmm(c_data', 2, u)
+
+	exp.(log_π̃(w_π)), exp.(log_Ã(w_A)), exp.(log_B̃(w_B))
+end
+
+# ╔═╡ e7837cab-749c-43e4-bb82-c9f87afde848
+π_i, A_casino, B_casino
 
 # ╔═╡ 3548e5b3-1120-4c6f-8169-884ffa755ed3
 size(c_data')
@@ -1010,21 +1134,29 @@ function e_mle(ys, π, A, B)
 
     log_ξ = zeros(K, K, T - 1)
     for t in 1:(T - 1)
-        for i in 1:K
-            for j in 1:K
-                log_ξ[i, j, t] = log_α[i, t] + log(A[i, j]) + log(B[j, ys[t+1]]) + log_β[j, t+1]
-            end
-        end
+		log_ξ[:, :, t] = log_α[:, t] .+ log.(A) .+ log.(B)[:, ys[t+1]]' .+ log_β[:, t+1]'
         log_ξ[:, :, t] .-= logsumexp(log_ξ[:, :, t]) 
     end
 
     return log_γ, log_ξ
 end
 
+# ╔═╡ f8fc9f13-e00f-4da7-b244-7bb497a1c669
+let
+	log_γ, log_ξ = e_mle(c_data', π_i, A_casino, B_casino)
+	# casino data
+	u = U_Prior(ones(2) .* 0.01, ones(2, 2) * 0.01, ones(2, 6) * 0.01)
+
+	w_π, w_A, w_B = vbem_m(c_data', log_γ, log_ξ, u::U_Prior)
+
+	# π̃, Ã, B̃
+	exp.(log_π̃(w_π)), exp.(log_Ã(w_A)), exp.(log_B̃(w_B))
+end
+
 # ╔═╡ d5bf0a63-4d30-463f-ac3e-00cdab3c7331
 function m_mle(log_γ, log_ξ, ys, K)
    	D, T = size(ys)
-    n_emissions = length(unique(vec(ys)))
+    P = length(unique(vec(ys)))
 
     # Update initial state probabilities - π
     log_π_new = log_γ[:, 1]
@@ -1035,10 +1167,10 @@ function m_mle(log_γ, log_ξ, ys, K)
 	log_A_new = log_A_numerator .- log_A_denominator
 
     # Update emission probabilities - B
-    log_B_new = zeros(K, n_emissions)
+    log_B_new = zeros(K, P)
 	
-	for j in 1:n_emissions
-	    obs_filter = (ys' .== j)
+	for j in 1:P
+	    obs_filter = (ys' .== j) # uni-var
 	    log_gamma_obs = logsumexp(log_γ[:, obs_filter], dims=2)
 	    log_gamma_total = logsumexp(log_γ, dims=2)
 		log_B_new[:, j] = log_gamma_obs .- log_gamma_total
@@ -1052,9 +1184,9 @@ end
 # ╔═╡ a3a1545f-9af4-409b-9b55-d7a62bdf5c5e
 function em_mle(ys, K, max_iter=100)
     D, T = size(ys)
-    n_emissions = length(unique(vec(ys)))
+    P = length(unique(vec(ys)))
 
-	Random.seed!(100)
+	Random.seed!(111)
 	
     # Initialize model parameters randomly
     π = rand(Dirichlet(ones(K)))
@@ -1062,7 +1194,7 @@ function em_mle(ys, K, max_iter=100)
     A = [rand(Dirichlet(ones(K))) for _ in 1:K]
     A = hcat(A...)'
 	
-    B = [rand(Dirichlet(ones(n_emissions))) for _ in 1:K]
+    B = [rand(Dirichlet(ones(P))) for _ in 1:K]
     B = hcat(B...)'
 
     for _ in 1:max_iter
@@ -1077,7 +1209,7 @@ function em_mle(ys, K, max_iter=100)
 end
 
 # ╔═╡ f35f68c3-df08-449a-9209-42f0c793f3de
-em_mle(c_data', 2) 
+em_mle(c_data', 2, 547) 
 
 # ╔═╡ 00000000-0000-0000-0000-000000000001
 PLUTO_PROJECT_TOML_CONTENTS = """
@@ -1608,12 +1740,19 @@ version = "17.4.0+0"
 # ╟─e74c5c83-9cf5-4d4a-ad9f-2785e18bc3ef
 # ╠═93d378e6-b6bf-4065-b483-5010a54b04b4
 # ╠═99234c60-3250-4c63-82ee-f15b6299d856
+# ╟─a4122178-c8c6-4e67-9a9a-ccf95d3bc96f
+# ╠═f8fc9f13-e00f-4da7-b244-7bb497a1c669
 # ╠═5baf0c31-717c-4e0c-84a5-ebe9da192dbd
+# ╠═072762bc-1f27-4a95-ad46-ddbdf45292cc
 # ╠═495d7a29-5b02-49d8-b376-bf1d088026c1
 # ╟─261c15ff-a80a-43df-bf51-33591d914aea
 # ╠═e7e199fd-cc7f-483f-b588-00013b9069d1
 # ╠═a2019816-e7b9-4eda-be76-9b3ebbb990e3
 # ╠═2b01dd4d-fba9-49dd-9802-67cea335d49c
+# ╟─c38bfc75-4281-4b52-aeac-0a9dbf7f8776
+# ╠═e4991173-290e-4a28-838b-f2afbec67c93
+# ╠═6ddf3db6-11f2-4cbc-a71e-e818ca1f27f4
+# ╠═e7837cab-749c-43e4-bb82-c9f87afde848
 # ╟─3da884a5-eacb-4749-a10c-5a6ad6da34b7
 # ╟─61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
 # ╟─4a573a35-51b2-4a42-b175-3ba017ef7245
@@ -1629,7 +1768,7 @@ version = "17.4.0+0"
 # ╠═a4b38c35-e320-439e-b169-b8af974e2635
 # ╟─54f38d75-aa88-4eb8-983e-e2a3038f910f
 # ╟─ebed75fc-0c10-48c7-9352-fc61bc3dcfd8
-# ╠═072762bc-1f27-4a95-ad46-ddbdf45292cc
+# ╟─137cafd1-fe56-4db8-9e28-f1e133887be4
 # ╟─820a3a70-6df9-4300-8037-21b2d51e8247
 # ╟─49d2d576-e58f-4988-a7df-cdc44c1448db
 # ╠═9390462c-ee9e-415c-a0cc-3942989ad494
