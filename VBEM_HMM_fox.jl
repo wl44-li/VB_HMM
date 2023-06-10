@@ -157,10 +157,9 @@ end
 
 # ╔═╡ 99234c60-3250-4c63-82ee-f15b6299d856
 # log_γ, log_ξ are sufficient stats from VBEM E-step
-function vbem_m(ys, log_γ, log_ξ, prior::U_Prior)
-    D, T = size(ys)
-	K, _ = size(log_γ)
-	P = length(unique(vec(ys)))
+function vbem_m(ys, labels, log_γ, log_ξ, prior::U_Prior)
+	K, T = size(log_γ)
+	V = length(labels)
 
     # Update Dirichlet parameters [prior + sufficient stats]
 	γ_counts = exp.(log_γ)
@@ -169,12 +168,21 @@ function vbem_m(ys, log_γ, log_ξ, prior::U_Prior)
 	w_A = prior.u_A .+ sum(exp.(log_ξ), dims=3)[:, :, 1]
 	w_B = prior.u_B
 	
-     for k in 1:K
-        for p in 1:P
-            joint_count = sum([γ_counts[k, t] for t in 1:T if ys[t] == p]) # uni-variate y
-            w_B[k, p] += joint_count
+    for t in 1:T
+        # Apply one-hot encoding to the t-th observation
+        yt_o = one_hot_yt(ys[:, t], labels)
+		w_B += γ_counts[:, t] * yt_o' #broadcast
+		
+		"""
+        for k in 1:K
+            for v in 1:V
+                # Add the weighted count for the t-th time step
+                w_B[k, v] += γ_counts[k, t] * yt_o[v]
+            end
         end
+		"""
     end
+
     return w_π, w_A, w_B
 end
 
@@ -210,25 +218,30 @@ md"""
 """
 
 # ╔═╡ e7e199fd-cc7f-483f-b588-00013b9069d1
-function forward_l(ys, log_π̃, log_Ã, log_B̃)
+function forward_l(ys, labels, log_π̃, log_Ã, log_B̃)
 	D, T = size(ys)
 	K = length(log_π̃) # K Hidden states
 	log_alpha = zeros(K, T)
-	l_ζs = zeros(T) # used for ELBO 
 	
+	l_ζs = zeros(T) # used for ELBO 
 
-	log_alpha[:, 1] = log_π̃ .+ log_B̃[:, ys[1]]
-    
-	# Normalize t=1
+	# t = 1
+	y_1_o = one_hot_yt(ys[:, 1], labels)
+	log_alpha[:, 1] = log_π̃ + log_B̃ * y_1_o
+	
 	l_ζs[1] = logsumexp(log_alpha[:, 1])
     log_alpha[:, 1] .-= l_ζs[1] 
 
     # Iterate through the remaining time steps
     for t in 2:T
+		yt_o = one_hot_yt(ys[:, t], labels)
+
+		#log_alpha[:, t] = log_B̃ * yt_o .+ logsumexp(log_Ã .+ log_alpha[:, t-1], dims=1)'
+
         for k in 1:K
-            log_alpha[k, t] = logsumexp(log_alpha[:, t-1] .+ log_Ã[:, k]) + log_B̃[k, ys[t]]
+            log_alpha[k, t] = logsumexp(log_alpha[:, t-1] .+ log_Ã[:, k]) + log_B̃[k, findfirst(Bool.(yt_o))]
         end
-		
+	
         # Normalize log_alpha for t > 1
 		l_ζs[t] = logsumexp(log_alpha[:, t])
         log_alpha[:, t] .-= l_ζs[t]
@@ -238,17 +251,20 @@ function forward_l(ys, log_π̃, log_Ã, log_B̃)
 end
 
 # ╔═╡ a2019816-e7b9-4eda-be76-9b3ebbb990e3
-function backward_l(ys, log_Ã, log_B̃)
+function backward_l(ys, labels, log_Ã, log_B̃)
 	D, T = size(ys)
     K = size(log_Ã, 1)
     log_beta = zeros(K, T)
 	
 	# casino data
 	for t in T-1:-1:1
-		for i in 1:K
-			log_beta[i, t] = logsumexp(log_Ã[i, :] .+ log_B̃[:, ys[:, t+1]] .+ 							   log_beta[:, t+1])
-		end
+		yt_o = one_hot_yt(ys[:, t+1], labels)
 		
+    	#log_beta[:, t] = logsumexp(log_Ã .+ log_B̃ * yt_o .+ log_beta[:, t+1], dims=1)
+
+		for k in 1:K
+			log_beta[k, t] = logsumexp(log_Ã[k, :] .+ log_B̃[:, findfirst(Bool.(yt_o))] .+ log_beta[:, t+1])
+		end
 		log_beta[:, t] .-= logsumexp(log_beta[:, t]) 
 	end
 
@@ -256,7 +272,7 @@ function backward_l(ys, log_Ã, log_B̃)
 end
 
 # ╔═╡ 2b01dd4d-fba9-49dd-9802-67cea335d49c
-function vbem_e(ys, w_π, w_A, w_B)
+function vbem_e(ys, P, w_π, w_A, w_B)
 	D, T = size(ys)
     K = length(w_π)
 	
@@ -264,16 +280,17 @@ function vbem_e(ys, w_π, w_A, w_B)
 	log_A = log_Ã(w_A)
 	log_B = log_B̃(w_B)
 		
-	log_α, log_ζs = forward_l(ys, log_π, log_A, log_B)
-	log_β = backward_l(ys, log_A, log_B)
+	log_α, log_ζs = forward_l(ys, P, log_π, log_A, log_B)
+	log_β = backward_l(ys, P, log_A, log_B)
 	
     log_γ = log_α .+ log_β
 	log_γ .-= logsumexp(log_γ, dims=1)
-
+	
 	log_ξ = zeros(K, K, T-1)
 	
     for t in 1:T-1
-		log_ξ[:, :, t] = log_α[:, t] .+ log_A .+ log_B[:, ys[t+1]]' .+ log_β[:, t+1]'
+		y_to = one_hot_yt(ys[:, t], P)
+		log_ξ[:, :, t] = log_α[:, t] .+ log_A .+ log_B[:, findfirst(Bool.(y_to))]' .+ log_β[:, t+1]'
         log_ξ[:, :, t] .-= logsumexp(log_ξ[:, :, t]) 
     end
 	
@@ -881,26 +898,27 @@ function kl_dirichlet(α::Array{Float64, 1}, β::Array{Float64, 1})
 end
 
 # ╔═╡ e4991173-290e-4a28-838b-f2afbec67c93
-function vbem_hmm(ys, K, prior::U_Prior, max_iter=1000, r_seed=69, tol=5e-3)
+function vbem_hmm(ys, K, prior::U_Prior, max_iter=500, r_seed=69, tol=5e-3)
 	D, T = size(ys)
-	P = length(unique(vec(ys)))
-
-	# random initialisation (sensitive start)
+	P = sort(unique(ys[:])) # labels
+	V = length(P)
+	
+	# random initialisation (sensitive start
 	Random.seed!(r_seed)
 	w_π = rand(Dirichlet(ones(K)))
     w_A = [rand(Dirichlet(ones(K))) for _ in 1:K]
     w_A = hcat(w_A...)'
-    w_B = [rand(Dirichlet(ones(P))) for _ in 1:K]
+    w_B = [rand(Dirichlet(ones(V))) for _ in 1:K]
     w_B = hcat(w_B...)'
 	
 	elbo_prev = -Inf
 	
 	for iter in 1:max_iter
         # E-step
-        log_γ, log_ξ, log_ζs = vbem_e(ys, w_π, w_A, w_B)
+        log_γ, log_ξ, log_ζs = vbem_e(ys, P, w_π, w_A, w_B)
 
         # M-step
-        w_π, w_A, w_B = vbem_m(ys, log_γ, log_ξ, prior)
+        w_π, w_A, w_B = vbem_m(ys, P, log_γ, log_ξ, prior)
 
 		# Convergence check
 		kl_π = kl_dirichlet(prior.u_π, w_π)
@@ -920,6 +938,7 @@ function vbem_hmm(ys, K, prior::U_Prior, max_iter=1000, r_seed=69, tol=5e-3)
 		if (iter == max_iter)
 			println("Warning: VB has not necessarily converged at $max_iter iterations")
 		end
+
     end
 
     return w_π, w_A, w_B
@@ -1052,8 +1071,51 @@ md"""
 
 # ╔═╡ 5597ece4-8184-4495-a2f9-a8ec1b7c5d2c
 md"""
-## MLE/ Baum-Welch (Uni-var y)
+## MLE/ Baum-Welch (Casino)
 """
+
+# ╔═╡ df01dca6-6c72-40bc-92d9-d38b5938f09e
+md"""
+Generate data using HMMBase
+"""
+
+# ╔═╡ 45ffda31-984f-4144-8b3f-7c452ed69d06
+begin
+	die1 = Categorical(1/6 * ones(6))
+	die2 = Categorical([1/10, 1/10, 1/10, 1/10, 1/10, 1/2])
+	A_casino = [0.9 0.1; 0.1 0.9]
+	π_i = [1.0, 0.0]
+	casinoHMM = HMM(π_i, A_casino, [die1, die2])
+	B_casino = hcat(die1.p, die2.p)'
+	Random.seed!(99)
+	true_coins, c_data = rand(casinoHMM, 2000, seq=true)
+	c_data = Int.(c_data) 
+end;
+
+# ╔═╡ 6ddf3db6-11f2-4cbc-a71e-e818ca1f27f4
+let
+	u = U_Prior(ones(2) .* 0.01 ./2 , ones(2, 2) .* 0.01 ./2 , ones(2, 6) .* 0.01 ./2)
+	
+	w_π, w_A, w_B = vbem_hmm(c_data', 2, u)
+	
+	P = sort(unique(c_data'[:]))
+	s_f = exp.(vbem_e(c_data', P, w_π, w_A, w_B)[1])
+	
+	ss = [x[1]*1 + x[2]*2 for x in eachcol(s_f)]
+	mad = mean(abs.(true_coins - ss))
+	rmse = sqrt(mean((true_coins - ss).^2))
+	
+	println("MAD: ", mad)
+	println("RMSE: ", rmse)
+	
+	π_vb, A_vb, B_vb = exp.(log_π̃(w_π)), exp.(log_Ã(w_A)), exp.(log_B̃(w_B))
+end
+
+# ╔═╡ e7837cab-749c-43e4-bb82-c9f87afde848
+π_i, A_casino, B_casino
+
+# ╔═╡ 276c73b9-0699-45da-b35c-317f42d18227
+c_data'
 
 # ╔═╡ f674e936-f124-48b6-bd3b-cce7f9b7e6b4
 function forward_mle(ys, π, A, B)
@@ -1062,7 +1124,7 @@ function forward_mle(ys, π, A, B)
     
 	log_alpha = zeros(K, T)
 
-	# casino data
+	# casino data - not one-hot encoded
 	log_alpha[:, 1] = log.(π) .+ log.(B[:, ys[1]])
 	log_alpha[:, 1] .-= logsumexp(log_alpha[:, 1])
 	
@@ -1083,7 +1145,7 @@ function backward_mle(ys, A, B)
     K = size(A, 1)
     log_beta = zeros(K, T)
 	
-	# casino data
+	# casino data - not one-hot encoded
 	for t in T-1:-1:1
 		for i in 1:K
 			log_beta[i, t] = logsumexp(log.(A[i, :]) .+ log.(B[:, ys[:, t+1]]) .+ 							   log_beta[:, t+1])
@@ -1095,48 +1157,16 @@ function backward_mle(ys, A, B)
 	return log_beta
 end
 
-# ╔═╡ 45ffda31-984f-4144-8b3f-7c452ed69d06
-begin
-	die1 = Categorical(1/6 * ones(6))
-	die2 = Categorical([1/10, 1/10, 1/10, 1/10, 1/10, 1/2])
-	A_casino = [0.9 0.1; 0.1 0.9]
-	π_i = [1.0, 0.0]
-	casinoHMM = HMM(π_i, A_casino, [die1, die2])
-	B_casino = hcat(die1.p, die2.p)'
-	Random.seed!(123)
-	true_coins, c_data = rand(casinoHMM, 4000, seq=true)
-	c_data = Int.(c_data) 
-end;
-
-# ╔═╡ 6ddf3db6-11f2-4cbc-a71e-e818ca1f27f4
-let
-	u = U_Prior(ones(2) .* 0.01, ones(2, 2) * 0.01, ones(2, 6) * 0.01)
-	w_π, w_A, w_B = vbem_hmm(c_data', 2, u)
-
-	s_f = exp.(vbem_e(c_data', w_π, w_A, w_B)[1])
-	ss = [x[1]*1 + x[2]*2 for x in eachcol(s_f)]
-	mad = mean(abs.(true_coins - ss))
-	rmse = sqrt(mean((true_coins - ss).^2))
-	println("MAD: ", mad)
-	println("RMSE: ", rmse)
-
-	π_vb, A_vb, B_vb = exp.(log_π̃(w_π)), exp.(log_Ã(w_A)), exp.(log_B̃(w_B))
-end
-
-# ╔═╡ e7837cab-749c-43e4-bb82-c9f87afde848
-π_i, A_casino, B_casino
-
-# ╔═╡ 2d1d5761-d407-42e4-a3b4-c84313ae7e65
-[die1, die2], B_casino
-
-# ╔═╡ 276c73b9-0699-45da-b35c-317f42d18227
-c_data'
-
 # ╔═╡ 09d078fa-2346-44fd-9e33-32203fc88b23
 forward(casinoHMM, c_data)[1]', backward(casinoHMM, c_data)[1]'
 
 # ╔═╡ 69e878f5-f893-424e-b059-ca848a1dd23f
 exp.(forward_mle(c_data', π_i, A_casino, B_casino)), exp.(backward_mle(c_data', A_casino, B_casino))
+
+# ╔═╡ 6a78f8a9-0d19-4eaa-8e2a-ce9290dbea15
+md"""
+Testing forward, backward
+"""
 
 # ╔═╡ 5fd43cac-f673-4218-b593-7453ffbd0c64
 function e_mle(ys, π, A, B)
@@ -1164,11 +1194,53 @@ let
 
 	# symmetric prior, fixed strength f = 0.1 scaled by K
 	u = U_Prior(ones(2) .* 0.1 ./2 , ones(2, 2) * 0.1 ./ 2, ones(2, 6) * 0.1 ./2)
+	
+	P = sort(unique(c_data'[:]))
 
-	w_π, w_A, w_B = vbem_m(c_data', log_γ, log_ξ, u::U_Prior)
+	w_π, w_A, w_B = vbem_m(c_data', P, log_γ, log_ξ, u::U_Prior)
 
 	# π̃, Ã, B̃
 	exp.(log_π̃(w_π)), exp.(log_Ã(w_A)), exp.(log_B̃(w_B))
+end
+
+# ╔═╡ 15ebed48-40f0-4c53-aaf3-e56cf42f0a74
+let
+	log_γ, log_ξ = e_mle(c_data', π_i, A_casino, B_casino)
+
+	# symmetric prior, fixed strength f = 0.1 scaled by K
+	u = U_Prior(ones(2) .* 0.1 ./2 , ones(2, 2) * 0.1 ./ 2, ones(2, 6) * 0.1 ./2)
+	
+	P = sort(unique(c_data'[:]))
+
+	w_π, w_A, w_B = vbem_m(c_data', P, log_γ, log_ξ, u::U_Prior)
+
+	log_π = log_π̃(w_π)
+	log_B = log_B̃(w_B)
+	y_1_o = one_hot_yt(c_data'[:, 1], P)
+	
+	log_f1 = log_π + log_B * y_1_o
+	
+	log_f1 .-= logsumexp(log_f1)
+
+	log_ff1 = log_π .+ log_B[:, findfirst(Bool.(y_1_o))]
+	log_ff1 .-= logsumexp(log_ff1)
+
+	log_f1, log_ff1
+end
+
+# ╔═╡ 1e44a7f5-75bc-4476-81b6-54acf093fa51
+let
+	# use MLE e-step results
+	log_γ, log_ξ = e_mle(c_data', π_i, A_casino, B_casino)
+	
+	# symmetric prior, fixed strength f = 0.1 scaled by K
+	u = U_Prior(ones(2) .* 0.1 ./2 , ones(2, 2) * 0.1 ./ 2, ones(2, 6) * 0.1 ./2)
+	
+	P = sort(unique(c_data'[:]))
+	w_π, w_A, w_B = vbem_m(c_data', P, log_γ, log_ξ, u::U_Prior)
+
+	log_γ, log_ξ, _ = vbem_e(c_data', P, w_π, w_A, w_B)
+	w_π, w_A, w_B = vbem_m(c_data', P, log_γ, log_ξ, u::U_Prior)
 end
 
 # ╔═╡ d5bf0a63-4d30-463f-ac3e-00cdab3c7331
@@ -1203,9 +1275,9 @@ end
 function em_mle(ys, K, max_iter=100)
     D, T = size(ys)
     P = length(unique(vec(ys)))
-
-	Random.seed!(111)
+    # not one-hot encoded
 	
+	Random.seed!(111)
     # Initialize model parameters randomly
     π = rand(Dirichlet(ones(K)))
 	
@@ -1225,9 +1297,6 @@ function em_mle(ys, K, max_iter=100)
     
     return π, A, B
 end
-
-# ╔═╡ 259b7fcc-8a7a-4ad9-9218-89cac914ca0f
-sort(unique(c_data'))
 
 # ╔═╡ c0af3e5c-ad73-4fe2-92d3-fdecf20c5512
 oh_y3 = one_hot_yt(c_data'[3], sort(unique(c_data')))
@@ -1266,7 +1335,7 @@ function forward_oh(ys, P, π, A, B)
 			log_alpha[i, t] = log_dot(B[i, :], y_t) + logsumexp(log(A[j, i]) + log_alpha[j, t-1] for j in 1:K)
 		end
 		
-		log_alpha[:, t] .-= logsumexp(log_alpha[:, t]) # normalize
+		log_alpha[:, t] .-= logsumexp(log_alpha[:, t])
 	end
 	
     return log_alpha
@@ -1325,6 +1394,11 @@ function e_oh(ys, π, A, B)
     return log_γ, log_ξ
 end
 
+# ╔═╡ 5f4a79c6-b319-41a9-a35f-094fbdfe68b6
+md"""
+Test E-step (with one-hot encoding)
+"""
+
 # ╔═╡ 5a264cf0-1d7b-468e-91fa-467e9ecb21bf
 e_mle(c_data', π_i, A_casino, B_casino), e_oh(c_data', π_i, A_casino, B_casino)
 
@@ -1357,6 +1431,11 @@ function m_oh(log_γ, log_ξ, ys)
     return exp.(log_π_new), exp.(log_A_new), B_new
 end
 
+# ╔═╡ 95dbae39-8221-4475-8d81-8d8cdfccefe7
+md"""
+Test M-step
+"""
+
 # ╔═╡ f1052288-7249-4de0-afea-dadd75da68ed
 let
 	log_g, log_x = e_oh(c_data', π_i, A_casino, B_casino)
@@ -1369,7 +1448,6 @@ function em_oh(ys, K, max_iter=100)
     P = length(unique(ys[:]))
 
 	Random.seed!(111)
-	
     # Initialize model parameters randomly
     π = rand(Dirichlet(ones(K)))
 	
@@ -1390,14 +1468,21 @@ function em_oh(ys, K, max_iter=100)
     return π, A, B
 end
 
+# ╔═╡ 0bfa1922-bb11-40e2-a972-1d656d4390fd
+md"""
+Test EM (Baum-Welch)
+"""
+
 # ╔═╡ ee5a5e53-7811-4d70-b856-c89eab5f89f7
 em_oh(c_data', 2) 
 
-# ╔═╡ f35f68c3-df08-449a-9209-42f0c793f3de
-π_mle, A_mle, B_mle = em_mle(c_data', 2, 460)
+# ╔═╡ 9eda917a-ac0b-48b9-a12f-960708deadf4
+md"""
+Test hidden var (X) inference
+"""
 
-# ╔═╡ e2b8f256-c9ec-4cae-ae29-3b8e5739e02b
-true_coins
+# ╔═╡ f35f68c3-df08-449a-9209-42f0c793f3de
+π_mle, A_mle, B_mle = em_mle(c_data', 2)
 
 # ╔═╡ be63f9e1-8886-4cda-9678-16ad78748d50
 let
@@ -1407,8 +1492,12 @@ let
 	rmse = sqrt(mean((true_coins - ss).^2))
 	println("MAD: ", mad)
 	println("RMSE: ", rmse)
-	s_f
 end
+
+# ╔═╡ 1fe0e1c1-44e1-4a15-82c5-8da8f12d843e
+md"""
+Aside, alter labels, should still work with one-hot encoding and identical to above
+"""
 
 # ╔═╡ fd501652-6a71-411d-b805-3be29390be03
 c_data_incre = c_data .+ 1
@@ -2455,10 +2544,12 @@ version = "17.4.0+0"
 # ╠═5baf0c31-717c-4e0c-84a5-ebe9da192dbd
 # ╠═072762bc-1f27-4a95-ad46-ddbdf45292cc
 # ╠═495d7a29-5b02-49d8-b376-bf1d088026c1
+# ╠═15ebed48-40f0-4c53-aaf3-e56cf42f0a74
 # ╟─261c15ff-a80a-43df-bf51-33591d914aea
 # ╠═e7e199fd-cc7f-483f-b588-00013b9069d1
 # ╠═a2019816-e7b9-4eda-be76-9b3ebbb990e3
 # ╠═2b01dd4d-fba9-49dd-9802-67cea335d49c
+# ╠═1e44a7f5-75bc-4476-81b6-54acf093fa51
 # ╟─c38bfc75-4281-4b52-aeac-0a9dbf7f8776
 # ╠═e4991173-290e-4a28-838b-f2afbec67c93
 # ╠═6ddf3db6-11f2-4cbc-a71e-e818ca1f27f4
@@ -2542,20 +2633,20 @@ version = "17.4.0+0"
 # ╠═4fad4cf7-20ce-4a7d-bbc0-c91a0d1611d4
 # ╟─4569a084-ba82-4e12-856e-719ebc3cecb3
 # ╟─5597ece4-8184-4495-a2f9-a8ec1b7c5d2c
+# ╟─df01dca6-6c72-40bc-92d9-d38b5938f09e
+# ╠═45ffda31-984f-4144-8b3f-7c452ed69d06
+# ╠═276c73b9-0699-45da-b35c-317f42d18227
 # ╠═f674e936-f124-48b6-bd3b-cce7f9b7e6b4
 # ╠═5b0ccc1c-ea6e-439d-9c04-c24dde87a22f
-# ╠═45ffda31-984f-4144-8b3f-7c452ed69d06
-# ╠═2d1d5761-d407-42e4-a3b4-c84313ae7e65
-# ╠═276c73b9-0699-45da-b35c-317f42d18227
 # ╠═09d078fa-2346-44fd-9e33-32203fc88b23
 # ╠═69e878f5-f893-424e-b059-ca848a1dd23f
+# ╟─6a78f8a9-0d19-4eaa-8e2a-ce9290dbea15
 # ╠═f9b02790-d6c5-4d69-896f-cba1b6c622b7
 # ╠═cda23c77-a219-4bbd-a4f0-22e43f8037d9
-# ╠═5fd43cac-f673-4218-b593-7453ffbd0c64
-# ╠═d5bf0a63-4d30-463f-ac3e-00cdab3c7331
+# ╟─5fd43cac-f673-4218-b593-7453ffbd0c64
+# ╟─d5bf0a63-4d30-463f-ac3e-00cdab3c7331
 # ╠═a3a1545f-9af4-409b-9b55-d7a62bdf5c5e
 # ╠═15eaf87f-865c-49e4-82a7-bcd8d648d831
-# ╠═259b7fcc-8a7a-4ad9-9218-89cac914ca0f
 # ╠═c0af3e5c-ad73-4fe2-92d3-fdecf20c5512
 # ╠═1d41f8ef-565d-41d6-955e-0e7fdbabbfc6
 # ╠═22cd1223-dadd-47a4-8d8b-686b554b4869
@@ -2564,14 +2655,18 @@ version = "17.4.0+0"
 # ╠═096ccd02-4844-466d-8532-cbb7cda80910
 # ╠═a9393ab8-1334-48a6-a47c-4bcfaab9929e
 # ╠═51a60031-6636-47d3-a447-058ead85229d
+# ╟─5f4a79c6-b319-41a9-a35f-094fbdfe68b6
 # ╠═5a264cf0-1d7b-468e-91fa-467e9ecb21bf
 # ╠═82fbde19-1a8c-4b6a-94db-ac49b59e2ac4
+# ╟─95dbae39-8221-4475-8d81-8d8cdfccefe7
 # ╠═f1052288-7249-4de0-afea-dadd75da68ed
 # ╠═1280da63-0964-4db0-91e8-6cd0c9d408de
+# ╟─0bfa1922-bb11-40e2-a972-1d656d4390fd
 # ╠═ee5a5e53-7811-4d70-b856-c89eab5f89f7
+# ╟─9eda917a-ac0b-48b9-a12f-960708deadf4
 # ╠═f35f68c3-df08-449a-9209-42f0c793f3de
-# ╠═e2b8f256-c9ec-4cae-ae29-3b8e5739e02b
 # ╠═be63f9e1-8886-4cda-9678-16ad78748d50
+# ╟─1fe0e1c1-44e1-4a15-82c5-8da8f12d843e
 # ╠═fd501652-6a71-411d-b805-3be29390be03
 # ╠═aa44d78a-0625-480a-96c3-012914b1c718
 # ╠═2e015146-94f4-47d8-b52e-2a403bfe72db
