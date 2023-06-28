@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v0.19.25
+# v0.19.26
 
 using Markdown
 using InteractiveUtils
@@ -72,7 +72,7 @@ $\begin{align}
 
 The 2nd line is given by the vectorised expression of log complete data likelihood, and $\ln \mathcal Z(Y)$ is another normalization constant
 
-Use modified parameter $\tilde{θ}$ for the forward-backward algorithm
+Use modified parameter $\tilde{θ}$ for the **forward-backward** algorithm
 
 $$\tilde{θ} = \{\exp \langle \ln π \rangle_{\hat q(π)},  \exp \langle \ln A \rangle_{\hat q(A)}, \exp \langle \ln B \rangle_{\hat q(B)}\}$$
 
@@ -88,9 +88,13 @@ $\begin{align}
 
 where $c$ is the normalizing constant; 
 
-2nd line given by: $q(π, A, B) = q(π) q(A) q(B)$
+2nd line given by: 
 
-3rd line given by: log complete likelihood $\ln p(S, Y| \mathbf{θ}) = s_1^T \ln π + \sum_{t=2}^T s_{t-1}^T \ln A \,s_t + \sum_{t=1}^T s_t^T \ln B \, y_t$
+$$q(π, A, B) = q(π) q(A) q(B)$$
+
+3rd line given by log complete likelihood:
+
+$$\ln p(S, Y| \mathbf{θ}) = s_1^T \ln π + \sum_{t=2}^T s_{t-1}^T \ln A \,s_t + \sum_{t=1}^T s_t^T \ln B \, y_t$$
 
 By conjugacy, variational posterior distributions have the same form as the priors with their hyperparameters `u` augmented by the sufficient statistics of the hidden states and observations `t(S, Y)`, these are computed from the E-step.
 
@@ -119,7 +123,7 @@ md"""
 
 # ╔═╡ e74c5c83-9cf5-4d4a-ad9f-2785e18bc3ef
 md"""
-For conventional HMM setup, priors over $π$, the rows of $A$, and the rows of $C$ are Dirichlet distributions:
+For conventional **discrete HMM** setup, both latent states $S$ and observations $Y$ are discrete RVs. priors over $π$, the rows of $A$, and the rows of $B$ are **Dirichlet** distributions:
 
 $p(π) = \mathcal Dir(π_1 , . . . , π_K | u^{(π)} )$
 
@@ -129,10 +133,10 @@ $p(A) = \prod_{j=1}^K \mathcal Dir( a_{j, 1}, ...,  a_{j, K} | u^{(A)})$
 $p(B) = \prod_{j=1}^K \mathcal Dir( b_{j, 1}, ...,  b_{j, D} | u^{(B)})$
 
 
-Whilst there are many possible choices, Dirichlet distributions have the advantage that they are conjugate to the complete-data likelihood.
+This choice of prior will have the advantage that they are conjugate to the complete-data likelihood. 
 
-## VB_M Variational update
-	dirichlet_params_() = ()_prior + suffstats_()
+## VB_M
+	dirichlet_m_() = ()_prior + ()_suff_stats
 
 $q(π) = \mathcal Dir(π_1 , . . . , π_K | w^{(π)})$
 
@@ -160,10 +164,9 @@ end
 function vbem_m(ys, labels, log_γ, log_ξ, prior::U_Prior)
 	K, T = size(log_γ)
 	V = length(labels)
+	γ_counts = exp.(log_γ)
 
     # Update Dirichlet parameters [prior + sufficient stats]
-	γ_counts = exp.(log_γ)
-	
 	w_π = prior.u_π .+ γ_counts[:, 1]
 	w_A = prior.u_A .+ sum(exp.(log_ξ), dims=3)[:, :, 1]
 	w_B = prior.u_B
@@ -171,16 +174,7 @@ function vbem_m(ys, labels, log_γ, log_ξ, prior::U_Prior)
     for t in 1:T
         # Apply one-hot encoding to the t-th observation
         yt_o = one_hot_yt(ys[:, t], labels)
-		w_B += γ_counts[:, t] * yt_o' #broadcast
-		
-		"""
-        for k in 1:K
-            for v in 1:V
-                # Add the weighted count for the t-th time step
-                w_B[k, v] += γ_counts[k, t] * yt_o[v]
-            end
-        end
-		"""
+		w_B += γ_counts[:, t] * yt_o' # broadcast
     end
 
     return w_π, w_A, w_B
@@ -189,6 +183,22 @@ end
 # ╔═╡ a4122178-c8c6-4e67-9a9a-ccf95d3bc96f
 md"""
 Test M-step (uni-variate y)
+"""
+
+# ╔═╡ 261c15ff-a80a-43df-bf51-33591d914aea
+md"""
+## VB_E
+"""
+
+# ╔═╡ 774dac01-d1a9-45e5-af8d-a10d60b989db
+md"""
+From the modified parameter $\tilde{θ}$:
+
+$$\tilde{θ} = \{\exp \langle \ln π \rangle_{\hat q(π)},  \exp \langle \ln A \rangle_{\hat q(A)}, \exp \langle \ln B \rangle_{\hat q(B)}\}$$
+
+Since we are working with conjugate exponential model, the expectation of the log of Dirichlet distributed probabilities have a ready-to-use propety to compute using the Di-gamma $Ψ$ function. 
+
+Here we present the more numerically stable version working in log-space. Details refer back to Beal 2003 paper equations `3.69, 3.70`.
 """
 
 # ╔═╡ 5baf0c31-717c-4e0c-84a5-ebe9da192dbd
@@ -201,20 +211,20 @@ end
 # E_q[ln(A)] # RE-USE
 function log_Ã(w_A)
 	row_sums = sum(w_A, dims=2)
-    log_A_exp = digamma.(w_A) .- digamma.(row_sums) # broadcasting
+    log_A_exp = digamma.(w_A) .- digamma.(row_sums) # broadcast
     return log_A_exp
 end
 
 # ╔═╡ 495d7a29-5b02-49d8-b376-bf1d088026c1
 function log_B̃(w_B)
 	row_sums = sum(w_B, dims=2)
-    log_B_exp = digamma.(w_B) .- digamma.(row_sums) # broadcasting
+    log_B_exp = digamma.(w_B) .- digamma.(row_sums) # broadcast
     return log_B_exp
 end
 
-# ╔═╡ 261c15ff-a80a-43df-bf51-33591d914aea
+# ╔═╡ f1c4d985-0a72-443b-953c-f1f5f3c78584
 md"""
-## VB_E
+forward-backward algorithm:
 """
 
 # ╔═╡ e7e199fd-cc7f-483f-b588-00013b9069d1
@@ -297,15 +307,25 @@ function vbem_e(ys, P, w_π, w_A, w_B)
     return log_γ, log_ξ, log_ζs
 end
 
+# ╔═╡ d6685c01-3b03-4f75-af60-e2eaca4cb63f
+md"""
+Test E-step 
+"""
+
 # ╔═╡ c38bfc75-4281-4b52-aeac-0a9dbf7f8776
 md"""
 ## VBEM
 """
 
+# ╔═╡ 44ef80d8-744b-4907-9d74-8e6596d0af3c
+md"""
+Ground-truth
+"""
+
 # ╔═╡ 3da884a5-eacb-4749-a10c-5a6ad6da34b7
 md"""
 # VBEM for HMM with MVN Emission
-The following (batch) VBEM follows largely from Beale's 2003 paper and Fox et al's paper in 2014
+The following (batch) VBEM extended from Beale's 2003 paper referenced Fox et al's paper in 2014
 
 Using the following structured mean-field approximation:
 
@@ -316,25 +336,9 @@ where $\{ϕ_k\}$ are parameters Normal (inverse) Wishart distributed, $ϕ_k = \{
 
 # ╔═╡ 61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
 md"""
-## VB_M, Dirichlet update
+## VB_M Dirichlet update
 
-During the E-step, you calculate the expected sufficient statistics, which can be the expected number of transitions between states `log_ξ`. After exponentiating and summing over time, you get the following sufficient statistics:
-
-    A matrix sufficient_A of shape (K, K) representing the expected number of transitions between states.
-
-The natural parameterization refers to the representation of the distributions in terms of their natural parameters. Using the natural parameterization often simplifies the calculations and updates in variational inference.
-
-    For the Dirichlet distribution, the natural parameterization is given by the vector of concentration parameters α = (α₁, α₂, ..., αₖ), where k is the number of states. The Dirichlet distribution is typically represented as:
-
-$Dir(π | α) \propto Πᵢ πᵢ^{αᵢ - 1}$
-
-The natural parameters are the exponents minus one: αᵢ - 1.
-
-When updating the Dirichlet parameters in the M-step, you add the prior parameters and the sufficient statistics:
-
-    dirichlet_params_A = A_prior + sufficient_A
-
-	η_new = α - 1 .+ sum(exp.(log_ξ), dims=3)
+This is very much similar to the M-step in discrete HMM, we update the Dirichlet prior with E-step sufficient statistics
 """
 
 # ╔═╡ 4a573a35-51b2-4a42-b175-3ba017ef7245
@@ -383,7 +387,7 @@ begin
 		m_k = prior.m * prior.κ + sum([ys[t, :] * rs[k, t] for t in 1:T])
 		Σ_k = prior.Σ + prior.κ*prior.m*prior.m' + sum([ys[t, :]*ys[t, :]'*rs[k, t] for t in 1:T])
 		
-		return Exp_MVN(m_k, κ_k, ν_k, Σ_k) # should parse a list of len K to forward/backward
+		return Exp_MVN(m_k, κ_k, ν_k, Σ_k)
 	end
 end
 
@@ -395,38 +399,40 @@ md"""
 # ╔═╡ b4d1bdf3-efd6-4851-9d33-e1564b8ed769
 # log_γ, log_ξ are sufficient stats from VBEM E-step
 # alpha, prior are initial prior hyperparameters
-function vbem_m_step(ys, log_γ, log_ξ, alpha, prior::Exp_MVN)
+function vbem_m_step(ys, log_γ, log_ξ, u_π, u_A, prior::Exp_MVN)
     K, T = size(log_γ)
-    
+	rs = exp.(log_γ)
+
+    # Update Dirichlet parameters [prior + sufficient stats]
+	w_π = u_π .+ rs[:, 1]
     # Update Dirichlet parameters [prior natural param + sufficient stats]
-    dirichlet_params_new = (alpha - 1) .+ sum(exp.(log_ξ), dims=3)[:, :, 1]
+    w_A = u_A .+ sum(exp.(log_ξ), dims=3)[:, :, 1]
 	
 	# Update NIW parameters [prior natural param + sufficient stats]
     Exp_MVNs = []
-	
-    rs = exp.(log_γ)
-	
+		
     for k in 1:K
 		Exp_mvn_k = Exp_MVN(prior, k, rs, ys)
 		push!(Exp_MVNs, Exp_mvn_k)
     end
     
-    return dirichlet_params_new, Exp_MVNs
+    return w_π, w_A, Exp_MVNs
 end
 
 # ╔═╡ d7aaea92-8cf6-4ac3-9929-559ab88d65e3
 md"""
-### Test M-Step
+### Test M-Step MVN update
 """
 
 # ╔═╡ a0fa9433-3ae7-4697-8eea-5d6ddefbf62b
 begin
-	# test M-step update to recover true mean and precision
+	# test M-step update to recover true mean and precision of MVN
 	Random.seed!(123)
 	
 	# ground-truth
 	μ = [-2, 1]
 	Σ = Matrix{Float64}([2 0; 0 3])
+	
 	data = rand(MvNormal(μ, Σ), 500) # D X T
 
 	# 3 x 100 sufficient stats q(s)
@@ -443,15 +449,15 @@ end
 
 # ╔═╡ e9b7bbd0-2de8-4a5b-af73-3b576e8c54a2
 md"""
-Test m-step update on mean
+Test M-step update on **mean**
 """
 
 # ╔═╡ 6905f394-3da2-4207-a511-888f7521d82a
-μ_m = post.m/post.κ # recover mean from natural param
+μ_m = post.m / post.κ # recover mean from natural param
 
 # ╔═╡ 5d746477-0282-4656-8db4-5a61561d3ccb
 md"""
-Test m-step update on Co-variance
+Test M-step update on **Co-variance** matrix
 """
 
 # ╔═╡ ac620936-66fb-4457-b9fd-9180fc9ba994
@@ -463,19 +469,11 @@ Test m-step update on Co-variance
 # ╔═╡ 54f38d75-aa88-4eb8-983e-e2a3038f910f
 md"""
 ## VB_E Step
-
-From the modified parameter $\tilde{θ}$ for the forward-backward algorithm:
-
-$$\tilde{θ} = \{\exp \langle \ln π \rangle_{\hat q(π)},  \exp \langle \ln A \rangle_{\hat q(A)}, \exp \langle \ln B \rangle_{\hat q(B)}\}$$
-
-Since we are working with conjugate exponential model, the expectation of the log of Dirichlet distributed probabilities have a ready-to-use propety to compute using the Di-gamma $Ψ$ function. 
-
-This works for $\tilde{A}$ and $\tilde{π}$. Here we present the more numerically stable version working in log-space. Details refer back to Beal 2003 paper equations `3.69, 3.70`.
 """
 
 # ╔═╡ ebed75fc-0c10-48c7-9352-fc61bc3dcfd8
 md"""
-### Expected log Ã
+### Expected log Ã, log π̃
 """
 
 # ╔═╡ 137cafd1-fe56-4db8-9e28-f1e133887be4
@@ -541,19 +539,47 @@ md"""
 ### Forward, Backward
 """
 
+# ╔═╡ bcd5ee7a-9e90-4153-8518-f7c8655dbd5d
+function forward_log(ys, log_π̃, log_Ã, Exp_MVNs)
+	T, D = size(ys)
+	K = length(Exp_MVNs) # K Hidden states
+	log_alpha = zeros(K, T)
+	l_ζs = zeros(T) # used for ELBO 
+
+	log_alpha[:, 1] = log_π̃ .+ [log_p̃(Exp_MVNs[k], ys[1, :]) for k in 1:K]
+    
+	# Normalize t=1
+	l_ζs[1] = logsumexp(log_alpha[:, 1])
+    log_alpha[:, 1] .-= l_ζs[1] 
+
+    # Iterate through the remaining time steps
+    for t in 2:T
+        for k in 1:K
+			log_emiss = log_p̃(Exp_MVNs[k], ys[t, :])
+            log_alpha[k, t] = log_emiss + logsumexp(log_alpha[:, t-1] .+ log_Ã[:, k])
+        end
+		
+        # Normalize log_alpha for t > 1
+		l_ζs[t] = logsumexp(log_alpha[:, t])
+        log_alpha[:, t] .-= l_ζs[t]
+    end
+
+    return log_alpha, l_ζs
+end
+
 # ╔═╡ 20753ea0-a5b0-403d-ab33-98c90263e314
 md"""
-Fox et al (2014) presented an alternative method of working out $π$ as the left leading eigenvector of $A$. This assumption that $π$ is the leading left eigenvector of $A$ is only valid under certain conditions, such as ergodicity of the Markov chain.
+Fox et al (2014) presented an alternative method of working out $π$ as the left leading eigenvector of $A$. This assumption that $π$ is the leading left eigenvector of $A$ is only valid under certain conditions, such as **ergodicity** of the Markov chain.
 """
 
 # ╔═╡ 7fda653c-2f37-4901-9676-8340978bca4d
-function forward_log(ys, log_Ã, Exp_MVNs)
+function forward_log_fox(ys, log_Ã, Exp_MVNs)
 	T, D = size(ys)
 	K = length(Exp_MVNs) # K Hidden states
 	log_alpha = zeros(K, T)
 	l_ζs = zeros(T) # used for ELBO 
 	
-	# Leading left eigen vector of Ã
+	# Leading left eigen vector of Ã as log_π
 	F = eigen((exp.(log_Ã))')
 	idx = argmax(F.values)
 	pi_sub = F.vectors[:, idx]
@@ -613,11 +639,11 @@ Putting together forward, backward and helper functions together constitute the 
 """
 
 # ╔═╡ 268464af-2842-4240-8551-ffc0cc130b70
-function vbem_e_step(ys, dirichlet_params, Exp_MVNs)
-    # Compute expected log transition probabilities 
-    log_A = log_Ã(dirichlet_params)
+function vbem_e_step(ys, w_π, w_A, Exp_MVNs)
+	log_π = log_π̃(w_π)
+    log_A = log_Ã(w_A)
 
-	log_α, log_ζs = forward_log(ys, log_A, Exp_MVNs)
+	log_α, log_ζs = forward_log(ys, log_π, log_A, Exp_MVNs)
 	log_β = backward_log(ys, log_A, Exp_MVNs)
 	
     # Compute log_ξ and log_γ [identical to Baum-Welch E-step]
@@ -647,9 +673,11 @@ md"""
 
 # ╔═╡ 84a4bb31-26f8-4a9e-a0b2-f5f8952ef08b
 # α, (μ0, κ0, ν0, Σ0) hyperparameters for Dirichlet and NIW priors
-function vbem(ys, K::Int64, mvn_prior::Exp_MVN, max_iter=100; α=1.0)
+function vbem(ys, K::Int64, mvn_prior::Exp_MVN, max_iter=100; α=0.1)
 	T, D = size(ys)
-    dirichlet_params = ones(K, K) * α # K X K
+	
+    w_A = ones(K, K) * α ./ K
+	w_π = ones(K) * α ./ K
 	
     # Exp_MVNs = [mvn_prior for _ in 1:K] NEED more randomness
 	Random.seed!(111)
@@ -662,15 +690,13 @@ function vbem(ys, K::Int64, mvn_prior::Exp_MVN, max_iter=100; α=1.0)
 	
     for iter in 1:max_iter
         # E-step
-        log_γ, log_ξ, _ = vbem_e_step(ys, dirichlet_params, Exp_MVNs)
+        log_γ, log_ξ, _ = vbem_e_step(ys, w_π, w_A, Exp_MVNs)
 
         # M-step
-        dirichlet_params, Exp_MVNs = vbem_m_step(ys, log_γ, log_ξ, α, mvn_prior)
-
-		# Convergence check [TO-DO]
+        w_π, w_A, Exp_MVNs = vbem_m_step(ys, log_γ, log_ξ, α, α, mvn_prior)
     end
 
-    return dirichlet_params, Exp_MVNs
+    return w_π, w_A, Exp_MVNs
 end
 
 # ╔═╡ f6d66591-f9a6-48f4-9d40-2fd08a220a38
@@ -680,7 +706,7 @@ md"""
 
 # ╔═╡ 171ea1db-a425-4cf2-93a8-01e94ff329cb
 md"""
-## Test $K=2$
+## $K=2$
 """
 
 # ╔═╡ 453d68e3-9a04-47c3-9af3-37d2347bfd64
@@ -701,9 +727,6 @@ begin
 	s_true, mvn_data = rand(mvnHMM, 2000, seq=true)
 end;
 
-# ╔═╡ c6dbe013-c810-4be3-b7d8-a072bd6432c1
-mvn_data # T X D matrix
-
 # ╔═╡ 20f39921-7187-4651-9b42-e1c4fc8f1056
 md"""
 **Ground truth** HMM
@@ -720,7 +743,7 @@ begin
 	ν_0 = d + 1.0
 	Σ_0 = Matrix{Float64}(I, d, d)
 	mvn_prior = Exp_MVN(μ_0, κ_0, ν_0, Σ_0)
-	dirichlet_f, niw_f = vbem(mvn_data, 2, mvn_prior, 5) # 5 iter
+	w_π, w_A, niw_f = vbem(mvn_data, 2, mvn_prior, 5)
 end;
 
 # ╔═╡ cfa4a7d2-3a6a-40bd-80fb-449f91584ed9
@@ -728,11 +751,14 @@ md"""
 ### Infer model parameters
 """
 
+# ╔═╡ 481edb0a-fc66-4e0c-b824-288045aa606f
+π_est = exp.(log_π̃(w_π))
+
 # ╔═╡ 1fdc1902-e892-4b4c-ac2e-5ea2222a6228
-A_est = exp.(log_Ã(dirichlet_f))
+A_est = exp.(log_Ã(w_A))
 
 # ╔═╡ 7333ac70-4f79-45f5-875a-3df38b55052a
-μs_est = [niw_f[i].m/niw_f[i].κ for i in 1:2]
+μs_est = [niw_f[i].m / niw_f[i].κ for i in 1:2]
 
 # ╔═╡ c6481a69-b6cb-4f90-a557-303eb7e42f09
 [(niw_f[i].Σ - niw_f[i].m*(niw_f[i].m)'/niw_f[i].κ)/niw_f[i].ν for i in 1:2]
@@ -744,8 +770,9 @@ md"""
 
 # ╔═╡ 0ff7f6fc-81a7-4eac-b933-5c8e71b6843b
 let
-	log_A = log_Ã(dirichlet_f)
-	log_α, _ = forward_log(mvn_data, log_A, niw_f)
+	log_π = log_π̃(w_π)
+	log_A = log_Ã(w_A)
+	log_α, _ = forward_log(mvn_data, log_π, log_A, niw_f)
 	log_β = backward_log(mvn_data, log_A, niw_f)
 	
     # Compute log_ξ and log_γ [identical to Baum-Welch E-step]
@@ -753,14 +780,11 @@ let
 	log_γ .-= logsumexp(log_γ, dims=1)
 	γ = exp.(log_γ)
 
-	[argmax(γ[:, t])[1] for t in 1:size(γ, 2)] #
+	[argmax(γ[:, t])[1] for t in 1:size(γ, 2)]
 end
 
-# ╔═╡ a33e7ee9-f8fb-4483-8b15-21d098e9b65d
-s_true # true hidden states
-
 # ╔═╡ 36b7ede6-6ed5-4daa-8a74-ccf6d049c3fa
-s_f = exp.(vbem_e_step(mvn_data, dirichlet_f, niw_f)[1])
+s_f = exp.(vbem_e_step(mvn_data, w_π, w_A, niw_f)[1])
 
 # ╔═╡ 10b8f741-ed45-4cd3-9817-a63f2e4a3aaf
 let
@@ -773,7 +797,7 @@ end
 
 # ╔═╡ 5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
 md"""
-## Test $K=3$
+## $K=3$
 """
 
 # ╔═╡ 4ab65b62-2f57-4c7b-a58a-b50b773863d0
@@ -784,8 +808,8 @@ begin
 	mvn3 = MvNormal(m3,  Σ_true[1])
 	π_3 = [1.0, 0.0, 0.0]
 	mvnHMM_k3 = HMM(π_3, A_mvn3, [mvn1, mvn2, mvn3])
-	s3_true, mvn_data_k3 = rand(mvnHMM_k3, 8000, seq = true)
-	dirichlet_3, niw_3 = vbem(mvn_data_k3, 3, mvn_prior)
+	s3_true, mvn_data_k3 = rand(mvnHMM_k3, 3000, seq = true)
+	w_π_3, w_A_3 , niw_3 = vbem(mvn_data_k3, 3, mvn_prior)
 end;
 
 # ╔═╡ a6143756-dafc-41d3-9a46-8a5c23dfd87e
@@ -801,13 +825,16 @@ md"""
 ### Infer model parameters
 """
 
+# ╔═╡ c763f8c5-ffcb-4c07-b94a-eead850bd48c
+exp.(log_π̃(w_π_3))
+
 # ╔═╡ da615595-cffd-4bf8-abd3-5498b7a4d202
 md"""
 Recover transition matrix estimation
 """
 
 # ╔═╡ 4a6712c6-955f-445e-9c68-b09ae5b00d3d
-A_est3 = exp.(log_Ã(dirichlet_3))
+A_est3 = exp.(log_Ã(w_A_3))
 
 # ╔═╡ f0a47b5e-40e6-4efe-b5c7-e3cc01270a0a
 md"""
@@ -830,14 +857,8 @@ md"""
 ### Hidden state inference
 """
 
-# ╔═╡ a3a23fb9-baad-4d04-b8da-82ce2267f0b7
-s3_true
-
 # ╔═╡ ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
-s_f3 = exp.(vbem_e_step(mvn_data_k3, dirichlet_3, niw_3)[1])
-
-# ╔═╡ 8f21e2cd-5f8b-4242-885b-9d42b22fad74
-s_f3[:, 1000] # index of 1 and 2 seemingly reversed? 
+s_f3 = exp.(vbem_e_step(mvn_data_k3, w_π_3, w_A_3, niw_3)[1])
 
 # ╔═╡ 9400ad3d-f2af-418e-971e-6031c7164c78
 let
@@ -846,7 +867,6 @@ let
 	rmse = sqrt(mean((s3_true - ss).^2))
 	println("MAD: ", mad)
 	println("RMSE: ", rmse)
-	ss
 end
 
 # ╔═╡ 18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
@@ -872,7 +892,7 @@ $\begin{align}
 
 where $\tilde{Z} = \prod_{t=1}^T \tilde{ζ_t}$, $\tilde{ζ_t}$ is the normalisation term from the modified forward pass.
 
-Hence, given the forward_log implementation:
+Hence, given the `forward_log` implementation:
 
 $\ln \tilde{Z} = \sum_{t=1}^T \ln \tilde{ζ_t}$
 """
@@ -884,14 +904,8 @@ Compute KL divergence of Dirichlet distributed rows of A
 
 # ╔═╡ d0cba4d1-2d02-4524-afd8-3150c5019f83
 # to be used for each row of A, α -> p(A), β -> q(A)
-function kl_dirichlet(α::Array{Float64, 1}, β::Array{Float64, 1})
-    # cf. Beal Appendix A, p261
-	
+function kl_dirichlet(α::Array{Float64, 1}, β::Array{Float64, 1})	
 	α_sum, β_sum = sum(α), sum(β)
-	
-    #kl = -loggamma(β_sum) + loggamma(α_sum) - sum(loggamma.(α) - loggamma.(β))
-    #kl += sum((α - β) .* (digamma.(α) .- digamma(α_sum)))
-
 	kl = loggamma(β_sum) - loggamma(α_sum) + sum(loggamma.(α) - loggamma.(β))
 	kl += sum((β - α) .* (digamma.(β) .- digamma(β_sum)))
     return kl
@@ -938,7 +952,6 @@ function vbem_hmm(ys, K, prior::U_Prior, max_iter=500, r_seed=69, tol=5e-3)
 		if (iter == max_iter)
 			println("Warning: VB has not necessarily converged at $max_iter iterations")
 		end
-
     end
 
     return w_π, w_A, w_B
@@ -978,51 +991,52 @@ function kl_niw(p::Exp_MVN, q::Exp_MVN)
 	return kl
 end
 
+# ╔═╡ 506584a7-dd36-45ed-8a9d-adb18b83f9aa
+struct D_Prior
+	u_π
+	u_A
+end
+
 # ╔═╡ a2e69fa3-17a3-4588-8f65-be6d77b09c4f
-function vbem_c(ys, K, mvn_prior::Exp_MVN, max_iter=200; α=1.0, tol=1e-3)
+function vbem_c(ys, K, mvn_prior::Exp_MVN, d_prior::D_Prior, max_iter=100, tol=5e-4)
 	T, D = size(ys)
-	
-    dirichlet_params_p = ones(K, K) * α # K X K
-	
-    # Exp_MVNs = [mvn_prior for _ in 1:K] NEED more randomness
 	Random.seed!(111)
 	μs = [rand(D) for _ in 1:K]
 	κ_0 = 0.1
 	ν_0 = D + 1.0
 	Σ_0 = Matrix{Float64}(I, D, D)
-
-	Exp_MVNs_p = [Exp_MVN(μs[i], κ_0, ν_0, Σ_0) for i in 1:K]
+	w_π = d_prior.u_π
+	w_A = d_prior.u_A
+	Exp_MVNs = [Exp_MVN(μs[i], κ_0, ν_0, Σ_0) for i in 1:K]
 	elbo_prev = -Inf
 
     for iter in 1:max_iter
         # E-step
-        log_γ, log_ξ, log_ζs = vbem_e_step(ys, dirichlet_params_p, Exp_MVNs_p)
+        log_γ, log_ξ, log_ζs = vbem_e_step(ys, w_π, w_A, Exp_MVNs)
 
         # M-step
-        dirichlet_params, Exp_MVNs = vbem_m_step(ys, log_γ, log_ξ, α, mvn_prior)
+        w_π, w_A, Exp_MVNs = vbem_m_step(ys, log_γ, log_ξ, d_prior.u_π, d_prior.u_A, mvn_prior)
 
 		# Convergence check
-		kl_A = sum(kl_dirichlet(dirichlet_params_p[i, :], dirichlet_params[i, :]) for i in 1:K)
-
-		kl_niw_ = sum(kl_niw(Exp_MVNs_p[i], Exp_MVNs[i]) for i in 1:K)
-
+		kl_π = kl_dirichlet(d_prior.u_π, w_π)
+		kl_A = sum(kl_dirichlet(d_prior.u_A[i, :], w_A[i, :]) for i in 1:K)
+		kl_niw_ = sum(kl_niw(mvn_prior, Exp_MVNs[i]) for i in 1:K)
 		log_Z̃ = sum(log_ζs)
-
-		elbo = kl_A + kl_niw_ + log_Z̃
+		elbo = kl_π + kl_A + kl_niw_ + log_Z̃
 		
 		if abs(elbo - elbo_prev) < tol
-			dirichlet_params_p = dirichlet_params
-			Exp_MVNs_p = Exp_MVNs
 			println("Stopped at iteration: $iter")
             break
 		end
 		
         elbo_prev = elbo
-		dirichlet_params_p = dirichlet_params
-		Exp_MVNs_p = Exp_MVNs
+		
+		if (iter == max_iter)
+			println("Warning: VB has not necessarily converged at $max_iter iterations")
+		end
     end
 
-    return dirichlet_params_p, Exp_MVNs_p
+    return w_π, w_A, Exp_MVNs
 end
 
 # ╔═╡ 482e735a-610c-414c-83ac-0e1e1e2d4d86
@@ -1032,14 +1046,20 @@ md"""
 
 # ╔═╡ 99c2a566-38a2-40f0-9184-d592ec79694e
 md"""
-### K = 2
+### $K = 2$
 """
 
 # ╔═╡ 875aa3bc-c4b9-4dce-987d-62dbe1d40d37
-dirichlet_c, niw_c = vbem_c(mvn_data, 2, mvn_prior)
+begin
+	d_prior = D_Prior(ones(2) .* 0.1 ./2 , ones(2, 2) .* 0.1 ./2)
+	w_π_c, w_A_c, niw_c = vbem_c(mvn_data, 2, mvn_prior, d_prior)
+end
+
+# ╔═╡ 29d23eef-98c6-4342-a7d9-6652ed219180
+exp.(log_π̃(w_π))
 
 # ╔═╡ 289d16d6-528e-4e07-9440-9573d2f71724
-A_est_c = exp.(log_Ã(dirichlet_c))
+A_est_c = exp.(log_Ã(w_A_c))
 
 # ╔═╡ 30cbc8bf-f0ae-4514-b4f3-1e8734f38377
 [niw_c[i].m/niw_c[i].κ for i in 1:2]
@@ -1047,22 +1067,61 @@ A_est_c = exp.(log_Ã(dirichlet_c))
 # ╔═╡ 58a00d74-3383-4e98-a4ec-97655801516a
 [(niw_c[i].Σ - niw_c[i].m*(niw_c[i].m)'/niw_c[i].κ)/niw_c[i].ν for i in 1:2]
 
+# ╔═╡ 44db64ce-192c-4439-a328-7912f4e9eee8
+mvnHMM
+
+# ╔═╡ c56f5863-bb02-4a05-97a9-16f3da9a95fe
+let
+	s_f = exp.(vbem_e_step(mvn_data, w_π_c, w_A_c, niw_c)[1])
+	ss = [x[1]*2 + x[2]*1 for x in eachcol(s_f)]
+	mad = mean(abs.(s_true - ss))
+	rmse = sqrt(mean((s_true - ss).^2))
+	println("MAD: ", mad)
+	println("RMSE: ", rmse)
+end
+
 # ╔═╡ 9365ad98-d6ff-424f-94ff-6c754315417c
 md"""
-### K = 3
+### $K = 3$
 """
 
 # ╔═╡ fbdd786f-24f2-497d-a804-7af8cf5cb72e
-dirichlet_c3, niw_c3 = vbem_c(mvn_data_k3, 3, mvn_prior)
+begin
+	d_prior_3 = D_Prior(ones(3) .* 0.1 ./2 , ones(3, 3) .* 0.1 ./2)
+	w_π_c3, w_A_c3, niw_c3 = vbem_c(mvn_data_k3, 3, mvn_prior, d_prior_3)
+end
+
+# ╔═╡ e88b5fe6-8e30-4a81-8a26-9561a06b4de6
+exp.(log_π̃(w_π_c3))
 
 # ╔═╡ 1e8b3bed-943e-4e93-a096-958e1dbdfa6d
-A_est_c3 = exp.(log_Ã(dirichlet_c3))
+A_est_c3 = exp.(log_Ã(w_A_c3))
 
 # ╔═╡ 54c2fe20-7b86-4d72-9449-5e942496fdb6
 [niw_c3[i].m/niw_c3[i].κ for i in 1:3]
 
 # ╔═╡ 4fad4cf7-20ce-4a7d-bbc0-c91a0d1611d4
 [(niw_c3[i].Σ - niw_c3[i].m*(niw_c3[i].m)'/niw_c3[i].κ)/niw_c3[i].ν for i in 1:3]
+
+# ╔═╡ 8e5c0542-81aa-490f-8875-573111e64873
+mvnHMM_k3
+
+# ╔═╡ ca6bab3c-b2c5-4056-830e-40684da51e46
+let
+	s_f3 = exp.(vbem_e_step(mvn_data_k3, w_π_c3, w_A_c3, niw_c3)[1])
+	ss = [x[1]*2 + x[2]*1 + x[3]*3 for x in eachcol(s_f3)]
+	mad = mean(abs.(s3_true - ss))
+	rmse = sqrt(mean((s3_true - ss).^2))
+	println("MAD: ", mad)
+	println("RMSE: ", rmse)
+end
+
+# ╔═╡ e43becd1-c3bb-4d42-876b-5a301fc92a79
+md"""
+TO-DO: 
+* Compare with Gibbs Sampling (FFBS)
+* Multi-Sequence Learning
+"""
 
 # ╔═╡ 4569a084-ba82-4e12-856e-719ebc3cecb3
 md"""
@@ -1113,6 +1172,25 @@ end
 
 # ╔═╡ e7837cab-749c-43e4-bb82-c9f87afde848
 π_i, A_casino, B_casino
+
+# ╔═╡ 662f7987-0723-4c37-b886-9ee8022cf336
+let
+	u = U_Prior(ones(2) .* 0.01 ./2 , ones(2, 2) .* 0.01 ./2 , ones(2, 6) .* 0.01 ./2)
+	
+	w_π, w_A, w_B = vbem_hmm(c_data' .+ 1, 2, u)
+	
+	P = sort(unique(c_data'[:]))
+	s_f = exp.(vbem_e(c_data', P, w_π, w_A, w_B)[1])
+	
+	ss = [x[1]*1 + x[2]*2 for x in eachcol(s_f)]
+	mad = mean(abs.(true_coins - ss))
+	rmse = sqrt(mean((true_coins - ss).^2))
+	
+	println("MAD: ", mad)
+	println("RMSE: ", rmse)
+	
+	π_vb, A_vb, B_vb = exp.(log_π̃(w_π)), exp.(log_Ã(w_A)), exp.(log_B̃(w_B))
+end
 
 # ╔═╡ 276c73b9-0699-45da-b35c-317f42d18227
 c_data'
@@ -1192,7 +1270,7 @@ end
 let
 	log_γ, log_ξ = e_mle(c_data', π_i, A_casino, B_casino)
 
-	# symmetric prior, fixed strength f = 0.1 scaled by K
+	# symmetric prior, fixed strength f = 0.1 scaled by K = 2
 	u = U_Prior(ones(2) .* 0.1 ./2 , ones(2, 2) * 0.1 ./ 2, ones(2, 6) * 0.1 ./2)
 	
 	P = sort(unique(c_data'[:]))
@@ -1209,7 +1287,6 @@ let
 
 	# symmetric prior, fixed strength f = 0.1 scaled by K
 	u = U_Prior(ones(2) .* 0.1 ./2 , ones(2, 2) * 0.1 ./ 2, ones(2, 6) * 0.1 ./2)
-	
 	P = sort(unique(c_data'[:]))
 
 	w_π, w_A, w_B = vbem_m(c_data', P, log_γ, log_ξ, u::U_Prior)
@@ -1219,7 +1296,6 @@ let
 	y_1_o = one_hot_yt(c_data'[:, 1], P)
 	
 	log_f1 = log_π + log_B * y_1_o
-	
 	log_f1 .-= logsumexp(log_f1)
 
 	log_ff1 = log_π .+ log_B[:, findfirst(Bool.(y_1_o))]
@@ -1541,7 +1617,7 @@ StatsFuns = "~1.3.0"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.9.0"
+julia_version = "1.9.1"
 manifest_format = "2.0"
 project_hash = "d27ccddcce64d93aaffaa38eb9e9dbc72d3aa1cb"
 
@@ -2516,7 +2592,7 @@ version = "1.0.3"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
-version = "5.7.0+0"
+version = "5.8.0+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -2541,20 +2617,25 @@ version = "17.4.0+0"
 # ╠═99234c60-3250-4c63-82ee-f15b6299d856
 # ╟─a4122178-c8c6-4e67-9a9a-ccf95d3bc96f
 # ╠═f8fc9f13-e00f-4da7-b244-7bb497a1c669
+# ╟─15ebed48-40f0-4c53-aaf3-e56cf42f0a74
+# ╟─261c15ff-a80a-43df-bf51-33591d914aea
+# ╟─774dac01-d1a9-45e5-af8d-a10d60b989db
 # ╠═5baf0c31-717c-4e0c-84a5-ebe9da192dbd
 # ╠═072762bc-1f27-4a95-ad46-ddbdf45292cc
 # ╠═495d7a29-5b02-49d8-b376-bf1d088026c1
-# ╠═15ebed48-40f0-4c53-aaf3-e56cf42f0a74
-# ╟─261c15ff-a80a-43df-bf51-33591d914aea
+# ╟─f1c4d985-0a72-443b-953c-f1f5f3c78584
 # ╠═e7e199fd-cc7f-483f-b588-00013b9069d1
 # ╠═a2019816-e7b9-4eda-be76-9b3ebbb990e3
 # ╠═2b01dd4d-fba9-49dd-9802-67cea335d49c
+# ╟─d6685c01-3b03-4f75-af60-e2eaca4cb63f
 # ╠═1e44a7f5-75bc-4476-81b6-54acf093fa51
 # ╟─c38bfc75-4281-4b52-aeac-0a9dbf7f8776
 # ╠═e4991173-290e-4a28-838b-f2afbec67c93
 # ╠═6ddf3db6-11f2-4cbc-a71e-e818ca1f27f4
-# ╠═e7837cab-749c-43e4-bb82-c9f87afde848
-# ╟─3da884a5-eacb-4749-a10c-5a6ad6da34b7
+# ╟─44ef80d8-744b-4907-9d74-8e6596d0af3c
+# ╟─e7837cab-749c-43e4-bb82-c9f87afde848
+# ╟─662f7987-0723-4c37-b886-9ee8022cf336
+# ╠═3da884a5-eacb-4749-a10c-5a6ad6da34b7
 # ╟─61a5e1fd-5480-4ed1-83ff-d3ad140cbcbc
 # ╟─4a573a35-51b2-4a42-b175-3ba017ef7245
 # ╠═ae313199-fe27-478a-b6b2-bee2923b5a54
@@ -2574,8 +2655,9 @@ version = "17.4.0+0"
 # ╟─49d2d576-e58f-4988-a7df-cdc44c1448db
 # ╠═9390462c-ee9e-415c-a0cc-3942989ad494
 # ╟─bc0d9def-56a6-4c66-9ba4-d3237cdf2343
+# ╠═bcd5ee7a-9e90-4153-8518-f7c8655dbd5d
 # ╟─20753ea0-a5b0-403d-ab33-98c90263e314
-# ╠═7fda653c-2f37-4901-9676-8340978bca4d
+# ╟─7fda653c-2f37-4901-9676-8340978bca4d
 # ╟─43660616-f1a8-434c-afc3-ac200d82425a
 # ╠═3c4f3444-2547-4ecd-816c-05b35c73f050
 # ╟─48f0208e-8b99-4b68-9982-02fa18bc0ab1
@@ -2585,17 +2667,16 @@ version = "17.4.0+0"
 # ╟─f6d66591-f9a6-48f4-9d40-2fd08a220a38
 # ╟─171ea1db-a425-4cf2-93a8-01e94ff329cb
 # ╠═453d68e3-9a04-47c3-9af3-37d2347bfd64
-# ╠═c6dbe013-c810-4be3-b7d8-a072bd6432c1
 # ╟─20f39921-7187-4651-9b42-e1c4fc8f1056
 # ╟─70c8ef1b-b2a9-4ecb-a8c9-70dd57411a8a
 # ╠═c7f6c9b4-b0dc-4da4-9ca4-dd96b4afb640
 # ╟─cfa4a7d2-3a6a-40bd-80fb-449f91584ed9
+# ╠═481edb0a-fc66-4e0c-b824-288045aa606f
 # ╠═1fdc1902-e892-4b4c-ac2e-5ea2222a6228
 # ╠═7333ac70-4f79-45f5-875a-3df38b55052a
 # ╠═c6481a69-b6cb-4f90-a557-303eb7e42f09
 # ╟─da6d3c66-4f8f-4d18-84ec-c84be9153474
 # ╠═0ff7f6fc-81a7-4eac-b933-5c8e71b6843b
-# ╠═a33e7ee9-f8fb-4483-8b15-21d098e9b65d
 # ╠═36b7ede6-6ed5-4daa-8a74-ccf6d049c3fa
 # ╠═10b8f741-ed45-4cd3-9817-a63f2e4a3aaf
 # ╟─5b9cd9ce-df0a-49c8-97b2-b0b9144ff323
@@ -2603,6 +2684,7 @@ version = "17.4.0+0"
 # ╟─a6143756-dafc-41d3-9a46-8a5c23dfd87e
 # ╠═66a1a7d4-db54-47f7-bdfe-953ba155e35a
 # ╟─1abdb6ea-8de2-4df2-b278-03335639a202
+# ╠═c763f8c5-ffcb-4c07-b94a-eead850bd48c
 # ╟─da615595-cffd-4bf8-abd3-5498b7a4d202
 # ╠═4a6712c6-955f-445e-9c68-b09ae5b00d3d
 # ╟─f0a47b5e-40e6-4efe-b5c7-e3cc01270a0a
@@ -2610,8 +2692,6 @@ version = "17.4.0+0"
 # ╟─1877d3d1-cc43-4271-9542-11d9d1bb7208
 # ╠═0c1e1848-67d1-4ebb-9b8c-534f7e0cb3c1
 # ╟─d5bbbd58-a4c0-466f-987a-a6f32a80a775
-# ╠═a3a23fb9-baad-4d04-b8da-82ce2267f0b7
-# ╠═8f21e2cd-5f8b-4242-885b-9d42b22fad74
 # ╠═ae6352cf-0343-4b4c-9fa7-8ba3792eafc7
 # ╠═9400ad3d-f2af-418e-971e-6031c7164c78
 # ╟─18e35e5b-dd37-4f0a-aa8e-f0aedcb658e2
@@ -2619,18 +2699,26 @@ version = "17.4.0+0"
 # ╠═d0cba4d1-2d02-4524-afd8-3150c5019f83
 # ╟─429c5dfd-4f78-4697-b710-777bd5a38240
 # ╠═51a5c3e6-7b0a-4d54-b9d3-5eb6054ec72d
+# ╠═506584a7-dd36-45ed-8a9d-adb18b83f9aa
 # ╠═a2e69fa3-17a3-4588-8f65-be6d77b09c4f
 # ╟─482e735a-610c-414c-83ac-0e1e1e2d4d86
 # ╟─99c2a566-38a2-40f0-9184-d592ec79694e
 # ╠═875aa3bc-c4b9-4dce-987d-62dbe1d40d37
+# ╠═29d23eef-98c6-4342-a7d9-6652ed219180
 # ╠═289d16d6-528e-4e07-9440-9573d2f71724
 # ╠═30cbc8bf-f0ae-4514-b4f3-1e8734f38377
 # ╠═58a00d74-3383-4e98-a4ec-97655801516a
+# ╠═44db64ce-192c-4439-a328-7912f4e9eee8
+# ╠═c56f5863-bb02-4a05-97a9-16f3da9a95fe
 # ╟─9365ad98-d6ff-424f-94ff-6c754315417c
 # ╠═fbdd786f-24f2-497d-a804-7af8cf5cb72e
+# ╠═e88b5fe6-8e30-4a81-8a26-9561a06b4de6
 # ╠═1e8b3bed-943e-4e93-a096-958e1dbdfa6d
 # ╠═54c2fe20-7b86-4d72-9449-5e942496fdb6
 # ╠═4fad4cf7-20ce-4a7d-bbc0-c91a0d1611d4
+# ╠═8e5c0542-81aa-490f-8875-573111e64873
+# ╠═ca6bab3c-b2c5-4056-830e-40684da51e46
+# ╟─e43becd1-c3bb-4d42-876b-5a301fc92a79
 # ╟─4569a084-ba82-4e12-856e-719ebc3cecb3
 # ╟─5597ece4-8184-4495-a2f9-a8ec1b7c5d2c
 # ╟─df01dca6-6c72-40bc-92d9-d38b5938f09e
